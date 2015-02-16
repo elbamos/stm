@@ -69,3 +69,4 @@ estep <- function(documents, beta.index, update.mu, #null allows for intercept o
   lambda <- do.call(rbind, lambda)
   return(list(sigma=sigma.ss, beta=beta.ss, bound=bound, lambda=lambda))
 }
+

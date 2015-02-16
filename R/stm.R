@@ -9,7 +9,8 @@ stm <- function(documents, vocab, K,
                 LDAbeta=TRUE, interactions=TRUE, 
                 ngroups=1, model=NULL,
                 gamma.prior=c("Pooled", "L1"), sigma.prior=0,
-                kappa.prior=c("L1", "Jeffreys"), control=list())  {
+                kappa.prior=c("L1", "Jeffreys"), control=list(),
+                spark.context = NULL)  {
   
   #Match Arguments and save the call
   init.type <- match.arg(init.type)
@@ -29,7 +30,7 @@ stm <- function(documents, vocab, K,
   #to make this backward compatible we reformulate to old structure.
   wcounts <- list(Group.1=sort(unique(wcountvec)))
   V <- length(wcounts$Group.1)  
-  if(!posint(wcounts$Group.1)) {
+  if(!stm:::posint(wcounts$Group.1)) {
     stop("Word indices are not positive integers")
   } 
   if(!isTRUE(all.equal(wcounts$Group.1,1:V))) {
@@ -44,11 +45,11 @@ stm <- function(documents, vocab, K,
   
   #Check the Number of Topics
   if(missing(K)) stop("K, the number of topics, is required.")
-  if(!(posint(K) && length(K)==1 && K>1)) stop("K must be a positive integer greater than 1.")
+  if(!(stm:::posint(K) && length(K)==1 && K>1)) stop("K must be a positive integer greater than 1.")
   if(K==2) warning("K=2 is equivalent to a unidimensional scaling model which you may prefer.")
   
   #Iterations, Verbose etc.
-  if(!(length(max.em.its)==1 & posint(max.em.its))) stop("Max EM iterations must be a single positive integer")
+  if(!(length(max.em.its)==1 & stm:::posint(max.em.its))) stop("Max EM iterations must be a single positive integer")
   if(!is.logical(verbose)) stop("verbose must be a logical.")
   
   ##
@@ -213,5 +214,5 @@ stm <- function(documents, vocab, K,
   ###
   # Finally run the actual model
   ###
-  return(stm.control(documents, vocab, settings,model))
+  return(stm.control(documents, vocab, settings,model, spark.context))
 }
