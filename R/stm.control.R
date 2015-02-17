@@ -66,14 +66,15 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
     rm(doclist)
       
     beta.rdd <- distribute.beta(beta$beta, spark.context) 
-    
+    mu <- distribute.mu(mu, spark.context)
   ############
   #Step 2: Run EM
   ############
   while(!stopits) {
         t1 <- proc.time()
         if (verbose) cat("Distributing E-Step\t")
-        documents.new.rdd <- estep.spark.better( 
+        documents.old.rdd <- documents.rdd
+        documents.rdd <- estep.spark.better( 
           documents.rdd = documents.rdd,
           N = length(documents),
           V = length(vocab),
@@ -82,10 +83,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
           sigma = sigma, 
           spark.context = spark.context,
           verbose) 
-        unpersist(documents.rdd)
-        unpersist(beta.rdd)
-        documents.rdd <- documents.new.rdd
-        persist(documents.rdd, "DISK_ONLY")
+        cache(documents.rdd)
 
 
 #         sigma.ss <- suffstats$sigma
@@ -99,6 +97,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
 #         sigma <- opt.sigma(nu=sigma.ss, lambda=lambda, 
 #                            mu=mu$mu, sigprior=settings$sigma$prior)
         print("Mapping beta.")
+        rm(beta.unreduced.rdd)
         beta.unreduced.rdd <- map(documents.rdd, function(x) {
           list(
                 key = x$doc.results$aspect, 
@@ -106,6 +105,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
           }
           )
         print("Combining beta.")
+        rm(beta.combined.rdd)
         beta.combined.rdd <- combineByKey(beta.unreduced.rdd, 
                                           createCombiner = function (v) {v}
                                           , mergeValue = "+" 
@@ -114,12 +114,15 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
         if (is.null(beta$kappa)) {
           print("Reducing beta.")
           beta.rdd <- mapValues(beta.combined.rdd, reduce.beta.nokappa) # there's only one aspect...
+          # beta is not being collected here
+          betaUncollected <- TRUE
           beta$beta.rdd <- beta.rdd
         }  else {
           if(settings$tau$mode=="L1") {
             print("Reducing beta for mnreg.")
              beta <- mnreg.spark(beta.combined.rdd, settings, spark.context)
              beta.rdd <- beta$beta.rdd
+            betaUncollected <- FALSE
           } else {
             print("Reducing beta for jefreys kappa.")
 
@@ -131,19 +134,20 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
         print("Reducing lambda")
         lambda <- reduce(lambda.rdd, rbind)
         if(verbose) {
-          cat(sprintf("E-Step Definitely Completed Within (%d seconds).  (And possibly part of the M-Step too.) \n", floor((proc.time()-t1)[3])))
+          cat(sprintf("E-Step Definitely Completed Within (%d seconds).  (And probably most of the m-step too.) \n", floor((proc.time()-t1)[3])))
           t1 <- proc.time()
         }
         lambda <- lambda[order(lambda[,1]),]
         lambda <- lambda[,-1]
         print("Opt mu")
-        mu <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
+        mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                covar=settings$covariates$X, settings$gamma$enet)
+        mu <- distribute.mu(mu.local, spark.context)
         sigma.extract.rdd <- map(documents.rdd, function(x) {x$doc.results$eta$nu}) 
         sigma.ss <- reduce(sigma.extract.rdd, "+")
         print("Opt sigma")
         sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
-               mu=mu$mu, sigprior=settings$sigma$prior)
+               mu=mu.local$mu, sigprior=settings$sigma$prior)
         
         bound.extract.rdd <- map(documents.rdd, function(x) {x[[2]]$bound.output})
         bound.ss <- reduce(bound.extract.rdd, rbind) 
@@ -159,11 +163,13 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
     # The report function won't work properly if there's no content covariate because beta hasn't been recovered
     if(!stopits & verbose) stm:::report(convergence, ntokens=ntokens, beta, vocab, 
                                        settings$topicreportevery, verbose)
+    unpersist(documents.old.rdd)
   }
+
   #######
   #Step 3: Construct Output
   #######
-  # Need to recover beta here
+  if (betaUncollected) beta$beta <- reduce(beta.rdd, rbind)
   time <- (proc.time() - globaltime)[3]
   #convert the beta back to log-space
   beta$logbeta <- beta$beta
@@ -171,8 +177,9 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
     beta$logbeta[[i]] <- log(beta$logbeta[[i]])
   }
   beta$beta <- NULL
+  beta$beta.rdd <- NULL
   lambda <- cbind(lambda,0)
-  model <- list(mu=mu, sigma=sigma, beta=beta, settings=settings,
+  model <- list(mu=mu.local, sigma=sigma, beta=beta, settings=settings,
                 vocab=vocab, convergence=convergence, 
                 theta=exp(lambda - stm:::row.lse(lambda)), 
                 eta=lambda[,-ncol(lambda), drop=FALSE],

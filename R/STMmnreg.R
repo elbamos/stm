@@ -1,6 +1,9 @@
 #Penalized multinomial regression methods for content covariates
 # using the distributed poisson approach
 
+
+
+
 mnreg <- function(beta.ss,settings) {
   #Parse Arguments
   A <- settings$dim$A
