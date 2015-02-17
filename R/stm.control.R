@@ -45,7 +45,8 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
   stopits <- FALSE
   
 
-#     includePackage(spark.context, "glmnet")
+    includePackage(spark.context, "glmnet")
+    includePackage(spark.context, "plyr")
     # if we change documents to have a key as the first element, then we can use an RDD
     if (is.null(names(documents))) names(documents) <- 1:length(documents)
     doc.keys <- names(documents)
@@ -72,7 +73,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
   while(!stopits) {
         t1 <- proc.time()
         if (verbose) cat("Distributing E-Step\t")
-        documents.rdd <- estep.spark.better( 
+        documents.new.rdd <- estep.spark.better( 
           documents.rdd = documents.rdd,
           N = length(documents),
           V = length(vocab),
@@ -81,6 +82,11 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
           sigma = sigma, 
           spark.context = spark.context,
           verbose) 
+        unpersist(documents.rdd)
+        unpersist(beta.rdd)
+        documents.rdd <- documents.new.rdd
+        persist(documents.rdd, "DISK_ONLY")
+
 
 #         sigma.ss <- suffstats$sigma
 #         lambda <- suffstats$lambda
@@ -92,7 +98,6 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
 #                      covar=settings$covariates$X, settings$gamma$enet)
 #         sigma <- opt.sigma(nu=sigma.ss, lambda=lambda, 
 #                            mu=mu$mu, sigprior=settings$sigma$prior)
-        cache(documents.rdd)
         print("Mapping beta.")
         beta.unreduced.rdd <- map(documents.rdd, function(x) {
           list(
@@ -109,15 +114,16 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
         if (is.null(beta$kappa)) {
           print("Reducing beta.")
           beta.rdd <- mapValues(beta.combined.rdd, reduce.beta.nokappa) # there's only one aspect...
+          beta$beta.rdd <- beta.rdd
         }  else {
           if(settings$tau$mode=="L1") {
-            beta.ss <- collect(beta.combined.rdd, flatten = TRUE)
-            beta <- stm:::mnreg(beta.ss,settings)
-#             beta <- mnreg.spark(beta.combined.rdd, settings)
-#             beta.rdd <- distribute.beta(spark.context, beta.combined.rdd)
+            print("Reducing beta for mnreg.")
+             beta <- mnreg.spark(beta.combined.rdd, settings, spark.context)
+             beta.rdd <- beta$beta.rdd
           } else {
-            beta.ss <- collect(beta.combined.rdd, flatten = TRUE)
-            beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
+            print("Reducing beta for jefreys kappa.")
+
+ #           beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
           }
         }
         print("Mapping lambda")
@@ -125,28 +131,22 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
         print("Reducing lambda")
         lambda <- reduce(lambda.rdd, rbind)
         if(verbose) {
-          cat(sprintf("Completed E-Step (%d seconds). \n", floor((proc.time()-t1)[3])))
+          cat(sprintf("E-Step Definitely Completed Within (%d seconds).  (And possibly part of the M-Step too.) \n", floor((proc.time()-t1)[3])))
           t1 <- proc.time()
-          cat("Starting M-Step. ")
         }
         lambda <- lambda[order(lambda[,1]),]
         lambda <- lambda[,-1]
         print("Opt mu")
         mu <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                covar=settings$covariates$X, settings$gamma$enet)
-        print("Mapping sigma")
         sigma.extract.rdd <- map(documents.rdd, function(x) {x$doc.results$eta$nu}) 
-        print("Reducing sigma")
         sigma.ss <- reduce(sigma.extract.rdd, "+")
         print("Opt sigma")
         sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                mu=mu$mu, sigprior=settings$sigma$prior)
         
-        print("Mapping bound")
         bound.extract.rdd <- map(documents.rdd, function(x) {x[[2]]$bound.output})
-        print("Reducing bound")
         bound.ss <- reduce(bound.extract.rdd, rbind) 
-        print("Have the bound")
         bound.ss <- bound.ss[order(bound.ss[,1]),-1]
         bound.ss <- as.vector(bound.ss)
         if (verbose) cat(sprintf("Completed M-Step (%d seconds). \n", floor(proc.time()-t1)[3]))
@@ -156,7 +156,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
     stopits <- convergence$stopits
 
     #Print Updates if we haven't yet converged
-    # The report function won't work properly because we don't have beta at this point -- confirm this is the reason
+    # The report function won't work properly if there's no content covariate because beta hasn't been recovered
     if(!stopits & verbose) stm:::report(convergence, ntokens=ntokens, beta, vocab, 
                                        settings$topicreportevery, verbose)
   }
@@ -174,7 +174,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
   lambda <- cbind(lambda,0)
   model <- list(mu=mu, sigma=sigma, beta=beta, settings=settings,
                 vocab=vocab, convergence=convergence, 
-                theta=exp(lambda - row.lse(lambda)), 
+                theta=exp(lambda - stm:::row.lse(lambda)), 
                 eta=lambda[,-ncol(lambda), drop=FALSE],
                 invsigma=solve(sigma), time=time, version=utils::packageDescription("stm")$Version)
   class(model) <- "STM"  

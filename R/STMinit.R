@@ -103,7 +103,7 @@ stm.init <- function(documents, settings) {
   #initialize the kappa vectors
   if(!settings$kappa$LDAbeta) {
     model$kappa <- kappa.init(documents, K, V, A, interactions=settings$kappa$interactions)
-  }
+  }  
   return(model)
 }
 

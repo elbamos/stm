@@ -42,12 +42,13 @@ estep.spark.better <- function(
   } else {
     estep.rdd <- documents.rdd
   }
+
   # merge with the right slice of beta
   estep.rdd <- keyBy(estep.rdd, function(x) {x[[2]]$aspect})
   estep.rdd <- leftOuterJoin(estep.rdd, beta.rdd, numPartitions = N)
   # perform logistic normal
   map(estep.rdd, function(y) {
-      if (is.null(y[[2]][[1]][[2]][["lambda"]])) {
+      if (! "Broadcast" %in% class(mu)) {
         # This executes if mu.i is being updated
         print("need to figure out mu.i")
         print(str(y))
@@ -61,15 +62,9 @@ estep.spark.better <- function(
       x$document$betaslice <- y[[2]][[2]]
       if(is.null(x$document$betaslice)) stop(paste("no beta", str(y)))
 
-    if (x$key == 1) {
-      print("y")
-      print(str(y))
-      print("x")
-      print(str(x))
-    }
-
     key = x$key
-    init <- x[["document"]][["lambda"]] 
+    init <- x[["document"]][["lambda"]]
+    if ("list" %in% class(init)) init <- init[[x[["document"]]$doc.num]]
     doc <- x[["document"]][["document"]] 
     mu.i <- x[["document"]][["mu.i"]] 
     if (!is.numeric(mu.i)) {
@@ -212,8 +207,6 @@ estep.spark <- function(
 }
 
 reduce.beta.nokappa <- function(x) {
-  print("beta no kappa reducer")
-  print(str(x))
   x/rowSums(x)
 }
 
@@ -227,34 +220,8 @@ distribute.beta <- function(beta, spark.context) {
     parallelize(spark.context, betalist)
 }
 
-distribute.mu <- function(mu, spark.context, doc.keys) {
-    if (is.null(mu$gamma)) {
-      mu <- mu$mu
-      return(broadcast(spark.context, mu))
-    } else {
-      index <- 0
-      mulist <- alply(mu$mu, .margins = 2, .dims = TRUE, 
-                      .fun = function(x) {
-       index <<- index + 1
-       list(key = doc.keys[index],
-            mu.i <- x)
-     } )
-      return(parallelize(spark.context, mulist))
-    }
-}
-distribute.lambda <- function(lambda, spark.context, doc.keys) {
-  index <- 0
-  lambdalist <- alply(lambda, .margins = 1, .dims = TRUE, 
-                    .fun = function(x) {
-                      index <<- index + 1
-                      list(key = index, #doc.keys[index],
-                           lambda <- x)
-                    } )
-    return(parallelize(spark.context, lambdalist))
-}
 
-
-mnreg.spark <- function(beta.combined.rdd,settings) {
+mnreg.spark <- function(beta.combined.rdd,settings, spark.context) {
   #Parse Arguments
   A <- settings$dim$A
   K <- settings$dim$K
@@ -270,9 +237,14 @@ mnreg.spark <- function(beta.combined.rdd,settings) {
   #Aggregate outcome data.
 #  counts <- do.call(rbind,beta.ss)
 #  New row count from beta...
-   beta.row.count.rdd <- mapValues(beta.combined.rdd, nrow)
-   beta.row.count <- reduce(beta.row.count.rdd, "+")
-
+   print("Counting rows")
+#   
+    cache(beta.combined.rdd)
+#    beta.row.count.rdd <- map(beta.combined.rdd, function(x) {
+#      nrow(x[[2]])
+#      })
+#    beta.row.count <- reduce(beta.row.count.rdd, "+")
+beta.row.count <- A * K
   
   #Three Cases
   if(A==1) { #Topic Model
@@ -292,6 +264,9 @@ mnreg.spark <- function(beta.combined.rdd,settings) {
     vecv <- rep(1,length(veci))
     covar <- sparseMatrix(veci, vecj, x=vecv)
   }
+
+# 
+covar.broadcast <- broadcast(spark.context, covar)
   
   
   if(fixedintercept) {  
@@ -302,36 +277,66 @@ mnreg.spark <- function(beta.combined.rdd,settings) {
   }
   
   # QUESTION: DO WE NEED TO SORT THIS IN ANY WAY?
-  beta.row.sums.rdd <- mapValues(beta.combined.rdd, rowSums)
-  mult.nobs <- reduce(beta.row.count.rdd, rbind)
-
+  print("Getting row sums")
+  #NOTE - IT IS SUSPICIOUS WHETHER THIS WORKS.  IT WAS RETURNING A K * A MATRIX, WHEN I'M EXPECTING A SINGLE 
+  # VECTOR OF K * A LENGTH.  
+  beta.row.sums.rdd <- map(beta.combined.rdd, function(x) {
+    list(1,list(x[[1]], log(rowSums(x[[2]]))))
+    })
+  print("Mult.nobs")
+  mult.nobs <- combineByKey(beta.row.sums.rdd, createCombiner = function(v) {
+                            ret <- rep(0, length = A * K) 
+                            start <- 1 +((v[[1]] - 1) * K)
+                            end <- start + K - 1
+                            ret[start:end] <- ret[start:end] + v[[2]]
+                            ret},
+                            function(C, v) {
+                              start <- 1 + ((v[[1]] - 1) * K)
+                              end <- start + K - 1
+                              C[start:end] <- C[start:end] + v[[2]]                              
+                              C
+                            },
+                            "+",
+                            1L)
+  offset <- take(mult.nobs, 1L)[[1]][[2]]
 #  mult.nobs <- rowSums(counts) #number of multinomial draws in the sample
-  offset <- log(mult.nobs)
+#  offset <- log(mult.nobs)
 
 #  counts <- split(counts, col(counts))
-  col.i <- 1
-  beta.transpose.rdd <- map(beta.combined.rdd, function(x) {
-    list(#aspect = x[[1]], 
-         column = 1, 
-         value = cbind(x[[1]], 1:nrow(x[[2]]), x[[2]][,1])
-    )
-  })
-  while (col.i < V) {
-    col.i <- col.i + 1
-    beta.transpose.rdd <- unionRDD(beta.transpose.rdd, map(beta.combined.rdd, function(x) {
-      list(#aspect = x[[1]], 
-           column = col.i, 
-           value = cbind(x[[1]], 1:nrow(x[[2]]), x[[2]][,col.i])
-           )
-    }))
-  }
-  beta.transpose.rdd <- combineByKey(beta.transpose.rdd, 
-                                      createCombiner = function(v) {v},
-                                      mergeValue = rbind, 
-                                      mergeCombiners = rbind,
-                                      numPartitions = V)
-  beta.transpose.rdd <- mapValues(beta.recombined.rdd, function(x) {x[order(x[,1], x[,2]),c(-1,-2)]})
-#  transposed.length <- count(beta.transpose.rdd)
+
+  # beta.combined.rdd should be a list of matrices beta[[aspect]][matrix]
+  print("transpose - flatten")
+ beta.transpose.rdd <- flatMap(beta.combined.rdd, function(x) {
+# Produce an rdd of key value pairs of the form:  list(column index, list(aspect, column contents))
+    col.i <- 0
+    llply(split(x[[2]], col(x[[2]])), .fun = function(y) {
+      col.i <<- col.i + 1
+      list(column = col.i, list(x[[1]], y))
+    })
+})
+  print("beta transpose combine")
+  unpersist(beta.combined.rdd)
+  beta.transpose.rdd <- combineByKey(beta.transpose.rdd, createCombiner = function(v) {
+    ret <- matrix(0, nrow = A * K, ncol = 1)
+      start <- 1 + ((v[[1]] - 1) * K)
+      end <- start + K - 1
+      ret[start:end] <- ret[start:end] + v[[2]]
+      ret},
+    mergeValue = function(C, v) {
+      start <- 1 + ((v[[1]] - 1) * K)
+      end <- start + K - 1
+      C[start:end] <- C[start:end] + v[[2]]
+      C
+    }  , 
+    # This should finish the transpose.  The rdd should now have one entry per column, keyed by column id, where
+    # the value is a column of the merged columns from each aspect matrix.
+    mergeCombiners = "+",
+    1L)
+  # For debugging purposes
+  cache(beta.transpose.rdd)
+  bob <- take(beta.transpose.rdd, 1L)
+  print("beta transpose.rdd debug output")
+  print(str(bob))
   
   #########
   #Distributed Poissons
@@ -353,7 +358,8 @@ mnreg.spark <- function(beta.combined.rdd,settings) {
 #  ctevery <- ifelse(transposed.length>100, floor(transposed.length/100), 1)
 #  out <- vector(mode="list", length=transposed.length)
   #now iterate over the vocabulary
-  mnreg.rdd <- map(beta.transposed.rdd, function(x) {
+  print("Big map")
+  mnreg.rdd <- map(beta.transpose.rdd, function(x) {
     i <- x[[1]]
     counts.i <- x[[2]]
     if(is.null(m)) {
@@ -363,7 +369,7 @@ mnreg.spark <- function(beta.combined.rdd,settings) {
     }
     mod <- NULL
     while(is.null(mod)) {
-      mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
+      mod <- tryCatch(glmnet(x=value(covar.broadcast), y=counts.i, family="poisson", 
                              offset=offset2, standardize=FALSE,
                              intercept=is.null(m), 
                              lambda.min.ratio=lambda.min.ratio,
@@ -380,37 +386,156 @@ mnreg.spark <- function(beta.combined.rdd,settings) {
     coef <- subM(mod$beta,lambda) #return coefficients
     if(is.null(m)) coef <- c(mod$a0[lambda], coef)
     #    out[[i]] <- coef
-    # Assuming that coef is a vector...
-    c(i, coef) 
+
+    list(i, coef) 
   })
+  unpersist(beta.transpose.rdd)
+  cache(mnreg.rdd)
+  # for debugging purposes
+  bob <- take(mnreg.rdd, 1L)
+  print("big map debug")
+  print(str(bob))
   # for now, we have to recover coef
-  coef <- reduce(mnreg.rdd, func = cbind)
-  coef <- coef[,order(coef[1,])]
-  coef <- coef[-1,]
+#   coef <- reduce(mnreg.rdd, func = cbind)
+#   coef <- coef[,order(coef[1,])]
+#   coef <- coef[-1,]
 
 #  coef <- do.call(cbind, out)
   if(!fixedintercept) {
     #if we estimated the intercept add it in
-    m <- coef[1,]
-    coef <- coef[-1,]
+    m <- lookup(mnreg.rdd, 1)[[1]] 
   }
-  kappa <- split(coef, row(coef))
+  #kappa <- split(coef, row(coef)) # NEED TO DEAL WITH THIS -- WILL FAIL RIGHT NOW
   ##
   #predictions 
   ##
   #linear predictor
-  linpred <- as.matrix(covar%*%coef)
-  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
+#   linpred <- as.matrix(covar%*%coef) #covar needs to be distributed
+# linpred <- sweep(linpred, 2, STATS=m, FUN="+")
+#softmax
+# explinpred <- exp(linpred)
+  linpred.rdd <- flatMap(mnreg.rdd, function(x) {
+    # The key is the id of a column of coef.  We are multiplying each row of covar by each column of coef.
+    covar <- value(covar.broadcast)
+    index <- 0
+    alply(covar, .margins = 1, .fun = function(x) {
+      index <<- index + 1 
+      list(
+        row <- index,
+        list(
+          column <- x[[1]], 
+#           linpred = (x * covar[index,]) + m[index], 
+           explinpred = exp((x[[2]] * covar[index,]) + m[index])
+        )
+      )
+    })
+# output should be an rdd, indexed by row, of list(column, explinpred)
+  })
+  bob <- take(linpred.rdd, 1L)
+  print("linpred debug")
+  print(str(bob))
+  beta.rdd <- combineByKey(linpred.rdd, createCombiner = function(v) {
+    # output of this should be an rdd, indexed by row, of the content of that row
+    row <- rep(0, length.out = V)
+    row[v$column] <- v$explinpred
+  }, 
+  function(C, v) {
+    C[v$column] <- v$explinpred
+  }, 
+  "+", 
+  A)
+
+bob <- take(beta.rdd, 1L)
+print("beta recombine debug")
+print(str(bob))
+
+#  beta <- explinpred/rowSums(explinpred)
+#   beta <- split(beta, rep(1:A, each=K))
+  beta.rdd <-flatMap(beta.rdd, function(x) {
+    index <- 0
+    alply(x[[2]]/sum(x[[2]]), .margins = 1, .fun = function(y) {
+      index <<- index + 1
+      list(aspect = (((index - 1) * A * K) + y[[1]]) %% K, # which cell in the total array, mod K
+           list(
+             row = x[[1]],
+             column = index, 
+             y))
+    }
+    )
+    #output should be an rdd, indexed by aspect, of list(row, column, value)
+  })
   
-  #softmax
-  explinpred <- exp(linpred)
-  beta <- explinpred/rowSums(explinpred)
-  
+bob <- take(beta.rdd, 1L)
+print("beta rdd row sums debug")
+print(str(bob))
+
   #wrangle into the list structure
-  beta <- split(beta, rep(1:A, each=K))
-  beta <- lapply(beta, matrix, nrow=K)
-  
+#  beta <- lapply(beta, matrix, nrow=K)
+
+  beta.rdd <- combineByKey(beta.rdd, createCombiner = function(v) {
+    ret <- matrix(0, nrow = K, ncol = V)
+    ret[v$row, v$column] <- ret[[3]] # This is not right, but we haven't figured out how to do it yet and it can stand in for now
+    ret
+  }, 
+  function(C, v) {
+    C[v$row, v$column] <- v[[3]]
+    C
+  }, 
+  "+", 
+  A)
+cache(beta.rdd)
+bob <- take(beta.rdd, 1L)
+print("beta output debug")
+print(str(bob))
+
+# kappa <- split(coef, row(coef)) # NEED TO DEAL WITH THIS -- WILL FAIL RIGHT NOW
   kappa <- list(m=m, params=kappa)
-  out <- list(beta=beta, kappa=kappa, nlambda=nlambda)
+  out <- list(kappa=kappa, nlambda=nlambda, beta.rdd = beta.rdd)
   return(out)
 }
+
+# This is the old code for transposing the beta list of matrices
+# # beta.transpose.rdd should at this point be a set of A * V matrices, 
+# # where each matrix is (K * 3).  The first two columns are the index number
+# # of the aspect, and the row number from the original beta.combined.rdd matrix
+# beta.transpose.rdd <- map(beta.combined.rdd, function(x) {
+#   print("transpose map")
+#   print(str(x))
+#   list(#aspect = x[[1]], 
+#     column = 1, 
+#     value = cbind(x[[1]], 1:nrow(x[[2]]), x[[2]][,1])
+#   )
+# })
+# print("Union loop")
+# while (col.i < V) {
+#   col.i <- col.i + 1
+#   beta.transpose.rdd <- unionRDD(beta.transpose.rdd, map(beta.combined.rdd, function(x) {
+#     ret <- list(#aspect = x[[1]], 
+#       column = col.i, 
+#       value = cbind(x[[1]], 1:nrow(x[[2]]), x[[2]][,col.i])
+#     )
+#     print("union")
+#     print(str(ret))
+#     ret
+#   }))
+# }
+# print("beta combine")
+# # At this point, there are A entries in the rdd for each term.  Now merge them by rbind.
+# # The result will be V matrices, each one K * 3.  The first two columns are the aspect
+# # index and row index of that row.
+# cache(beta.transpose.rdd) # for debugging
+# bob <- reduce(beta.transpose.rdd, c) # the only purpose of this is to force completion for debugging purposes
+# beta.transpose.rdd <- combineByKey(beta.transpose.rdd, 
+#                                    createCombiner = function(v) {
+#                                      print("create combiner")
+#                                      print(str(v)) 
+#                                      v},
+#                                    mergeValue = rbind, 
+#                                    mergeCombiners = rbind,
+#                                    numPartitions = V)
+# print("map value beta")
+# beta.transpose.rdd <- mapValues(beta.transpose.rdd, function(x) {
+#   print(str(x))
+#   x[order(x[,1], x[,2]),c(-1,-2)]
+# })
+# #  transposed.length <- count(beta.transpose.rdd)
