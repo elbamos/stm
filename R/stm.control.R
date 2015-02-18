@@ -119,14 +119,14 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
           beta$beta.rdd <- beta.rdd
         }  else {
           if(settings$tau$mode=="L1") {
-            print("Reducing beta for mnreg.")
+            print("mnreg.")
              beta <- mnreg.spark(beta.combined.rdd, settings, spark.context)
              beta.rdd <- beta$beta.rdd
             betaUncollected <- FALSE
           } else {
             print("Reducing beta for jefreys kappa.")
-
- #           beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
+            beta.ss <- collect(beta.combined.rdd) 
+            beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
           }
         }
         print("Mapping lambda")
