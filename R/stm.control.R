@@ -67,6 +67,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       
     beta.rdd <- distribute.beta(beta$beta, spark.context, settings$dim$A) 
     mu <- distribute.mu(mu, spark.context)
+    if (doDebug) print("Distributed initial rdd's")
   ############
   #Step 2: Run EM
   ############
@@ -85,6 +86,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
           spark.partitions = spark.partitions,
           verbose) 
         persist(documents.rdd, "OFF_HEAP")
+        if (doDebug) print("persisted off heap")
 
 
 #         sigma.ss <- suffstats$sigma

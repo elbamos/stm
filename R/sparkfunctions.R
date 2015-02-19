@@ -1,5 +1,5 @@
 doDebug <- FALSE
-if (doDebug) library(pryr)
+
 
 estep.spark.better <- function( 
   N,
@@ -20,14 +20,16 @@ estep.spark.better <- function(
   siginv <- solve(sigma)
   
   #broadcast what we need
-  sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
-  siginv.broadcast <- broadcast(spark.context, siginv)
   if (doDebug) {
     print("sigma")
     print(object_size(sigma))
     print("siginv")
     print(object_size(siginv))
   }
+  siginv.broadcast <- broadcast(spark.context, siginv)
+  if (doDebug) print("broadcast siginv")
+  sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
+  if (doDebug) print("broadcast sigma")
   
   # setup mu.i
   if (! "Broadcast" %in% class(mu)) {
@@ -51,6 +53,7 @@ estep.spark.better <- function(
            doc)
     }
     })
+  if (doDebug) print ("join")
   estep.rdd <- leftOuterJoin(estep.rdd, beta.rdd, numPartitions = spark.partitions)
   # perform logistic normal
   if (doDebug) print("mapping e-step")

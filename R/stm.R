@@ -17,6 +17,10 @@ stm <- function(documents, vocab, K,
   init.type <- match.arg(init.type)
   Call <- match.call()
   
+  #setup debug
+  if (is.null(doDebug)) doDebug <<- FALSE
+  if (doDebug) library(pryr)
+  
   #Documents
   if(missing(documents)) stop("Must include documents")
   if(!is.list(documents)) stop("documents must be a list, see documentation.")

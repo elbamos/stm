@@ -15,6 +15,7 @@ source("./R/STMreport.R")
 
 library(SparkR)
 # spark.context <- sparkR.init("local", "estep")
+doDebug = TRUE
 spark.context <- sparkR.init(master="spark://ec2-54-84-165-134.compute-1.amazonaws.com:7077", appName = "poli",
             sparkEnvir=list(spark.executor.memory="4g", 
                             spark.storage.memoryFraction = "0.1",
