@@ -47,6 +47,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
 
     includePackage(spark.context, "glmnet")
     includePackage(spark.context, "plyr")
+    includePackage(spark.context, "Matrix")
     # if we change documents to have a key as the first element, then we can use an RDD
     if (is.null(names(documents))) names(documents) <- 1:length(documents)
     doc.keys <- names(documents)
@@ -85,7 +86,8 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
           spark.context = spark.context,
           spark.partitions = spark.partitions,
           verbose) 
-        persist(documents.rdd, "OFF_HEAP")
+        persist(documents.rdd#, "OFF_HEAP") 
+        ,"MEMORY_ONLY_SER")
         if (doDebug) print("persisted off heap")
 
 
@@ -104,7 +106,7 @@ if (doDebug) print("Mapping beta.")
         beta.unreduced.rdd <- map(documents.rdd, function(x) {
           list(
                 key = x$doc.results$aspect, 
-                beta.slice = x$doc.results$beta.slice)
+                beta.slice = x$document$beta.slice)
           }
           )
 if (doDebug) print("Combining beta.")
@@ -112,7 +114,7 @@ if (doDebug) print("Combining beta.")
         beta.combined.rdd <- combineByKey(beta.unreduced.rdd, 
                                           createCombiner = function (v) {v}
                                           , mergeValue = "+" 
-                                          , mergeCombiners = "+" , settings$dim$A) # need to fix number of partitions
+                                          , mergeCombiners = "+" , spark.partitions) # need to fix number of partitions
 
         if (is.null(beta$kappa)) {
           if (doDebug) print("Reducing beta.")
@@ -133,7 +135,7 @@ if (doDebug) print("Combining beta.")
           }
         }
 if (doDebug) print("Mapping lambda")
-        lambda.rdd <- map(documents.rdd, function(x) {x$doc.results$lambda.output})
+        lambda.rdd <- map(documents.rdd, function(x) {c(x$document$doc.num, x$document$lambda)})
 if (doDebug) print("Reducing lambda")
         lambda <- reduce(lambda.rdd, rbind)
         if(verbose) {
@@ -146,7 +148,7 @@ if (doDebug) print("Opt mu")
         mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                covar=settings$covariates$X, settings$gamma$enet)
         mu <- distribute.mu(mu.local, spark.context, spark.partitions)
-        sigma.extract.rdd <- map(documents.rdd, function(x) {x$doc.results$eta$nu}) 
+        sigma.extract.rdd <- map(documents.rdd, function(x) {x$document$sigma}) 
         sigma.ss <- reduce(sigma.extract.rdd, "+")
 if (doDebug) print("Opt sigma")
         sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 

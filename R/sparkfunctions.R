@@ -42,7 +42,7 @@ estep.spark.better <- function(
     estep.rdd <- documents.rdd
   }
 
-  # merge with the right slice of beta
+  # Join with mu, if necessary, and set the key to 'aspect' so can be joined with beta
   estep.rdd <- map(estep.rdd, function(x) {
     if (length(x[[2]]) > 2) {
       list(aspect = x[[2]]$aspect, document = x[[2]])
@@ -65,7 +65,6 @@ estep.spark.better <- function(
       if (! is.null(mu.carry)) document$mu.i <- as.numeric(value(mu.carry))
       # do we really need to braodcast this if its only one matrix?
       
-    init <- document$lambda
     if (doDebug && document$doc.num == 1) {
       print(y)
       print(str(y))
@@ -84,29 +83,33 @@ estep.spark.better <- function(
     siginv <- value(siginv.broadcast)
     sigmaentropy <- value(sigmaentropy.broadcast)
 
-    doc.results <- stm:::logisticnormal(eta = init, 
+    doc.results <- stm:::logisticnormal(eta = document$lambda, 
                                         mu = document$mu.i, 
                                         siginv = siginv,
                                         beta = beta.i, 
                                         doc = doc,
                                         sigmaentropy  = sigmaentropy
     )
+    if (doDebug) print("finished logistic normal")
+    document$lambda <- doc.results$eta.lambda
+    document$sigma <- doc.results$eta.nu
+#     doc.results$doc.num <- document$doc.num
+#     doc.results$key <- document$key
+#     doc.results$document <- doc
+#     doc.results$aspect <- document$aspect
+#     doc.results$lambda <- doc.results$eta$lambda
 
-    doc.results$doc.num <- document$doc.num
-    doc.results$key <- document$key
-    doc.results$document <- doc
-    doc.results$aspect <- document$aspect
-    doc.results$lambda <- doc.results$eta$lambda
-    doc.results$lambda.output <- c(doc.results$doc.num, doc.results$eta$lambda)
-    beta.slice <- matrix(0, ncol = V, nrow = nrow(doc.results$phis))
+    beta.slice <- Matrix(FALSE, ncol = V, nrow = nrow(doc.results$phis))
     beta.slice[,words] <- beta.slice[,words] + doc.results$phis
-    doc.results$beta.slice <- beta.slice
+    document$beta.slice <- beta.slice
+#     doc.results$beta.slice <- beta.slice
     if (doDebug) {
-      doc.results$betachecksum <- sum(beta.slice) 
-      doc.results$phi.checksum <- sum(doc.results$phis)
+      document$betachecksum <- sum(beta.slice) 
+      document$phi.checksum <- sum(doc.results$phis)
     }
-    doc.results$bound.output <- c(doc.results$doc.num, doc.results$bound)
-    list(key = doc.results$doc.num, doc.results = doc.results)
+    document$bound.output <- c(document$doc.num, doc.results$bound)
+if (doDebug) print("finished big map")
+    list(key = doc.results$doc.num, document = document)
   }
   )
 }
@@ -167,9 +170,10 @@ mnreg.spark <- function(beta.combined.rdd,settings, spark.context, spark.partiti
 #  counts <- do.call(rbind,beta.ss)
 if (doDebug) print("getting counts")
 counts <- reduce(beta.combined.rdd, function(x, y) {
+  if (doDebug) print("getting a count")
   if ("list" %in% class(x)) x <- x[[2]]
   if ("list" %in% class(y)) y <- y[[2]]
-  rbind(x, y)
+  rBind(x, y)
 }) # but is this the right order???
 if (doDebug) print("beta.ss -- If the model completes but the output is funny, the sorting of this matrix is a suspect")
 
@@ -292,7 +296,7 @@ if (doDebug)  print("wrap up the function and redistribute beta")
   beta <- split(beta, rep(1:A, each=K))
 
   #wrangle into the list structure
-  beta <- lapply(beta, matrix, nrow=K)
+  beta <- lapply(beta, Matrix, nrow=K)
   beta.rdd <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
 
   kappa <- list(m=m, params=kappa)

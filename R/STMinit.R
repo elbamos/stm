@@ -25,12 +25,12 @@ stm.init <- function(documents, settings) {
                                        alpha=alpha, eta=eta)
     
     beta <- as.numeric(mod$topics) + eta #recasting to avoid overflow
-    beta <- matrix(beta, nrow=K)
+    beta <- Matrix(beta, nrow=K)
     beta <- beta/rowSums(beta)
     
     theta <- as.numeric(mod$document_expects) #these are actually sums not expects
     theta[theta==0] <- .01 #stabilize the 0's for the log case
-    theta <- matrix(theta, nrow=K) #reorganize
+    theta <- Matrix(theta, nrow=K) #reorganize
     Ndoc <- colSums(theta) #get word counts by doc
     theta <- t(theta)/Ndoc  #norm to proportions
     lambda <- log(theta) - log(theta[,K]) #get the log-space version
@@ -38,15 +38,15 @@ stm.init <- function(documents, settings) {
     rm(theta) #clear out theta
     
     mu <- colMeans(lambda) #make a globally shared mean
-    mu <- matrix(mu, ncol=1)
+    mu <- Matrix(mu, ncol=1)
     sigma <- cov(lambda)    
   }
   if(mode=="Random") {
-    mu <- matrix(0, nrow=(K-1),ncol=1)
+    mu <- Matrix(0, nrow=(K-1),ncol=1)
     sigma <- diag(20, nrow=(K-1))
-    beta <- matrix(rgamma(V * K, .1), ncol = V)
+    beta <- Matrix(rgamma(V * K, .1), ncol = V)
     beta <- beta/rowSums(beta)
-    lambda <- matrix(0, nrow=N, ncol=(K-1))
+    lambda <- Matrix(0, nrow=N, ncol=(K-1))
   }
   if(mode=="Spectral") {
     verbose <- settings$verbose
@@ -84,7 +84,7 @@ stm.init <- function(documents, settings) {
       #if there were zeroes, reintroduce them
       #assign missing compoinents the machine double epsilon
       #and renormalize just in case.
-      beta.new <- matrix(0, nrow=K, ncol=V)
+      beta.new <- Matrix(0, nrow=K, ncol=V)
       beta.new[,keep] <- beta
       beta.new[,temp.remove] <- .Machine$double.eps 
       beta <- beta.new/rowSums(beta.new)  
@@ -92,9 +92,9 @@ stm.init <- function(documents, settings) {
     }
     
     # (4) generate other parameters
-    mu <- matrix(0, nrow=(K-1),ncol=1)
+    mu <- Matrix(0, nrow=(K-1),ncol=1)
     sigma <- diag(20, nrow=(K-1))
-    lambda <- matrix(0, nrow=N, ncol=(K-1))
+    lambda <- Matrix(0, nrow=N, ncol=(K-1))
     if(verbose) cat("Initialization complete.\n")
   }
   #turn beta into a list and assign it for each aspect
@@ -113,7 +113,7 @@ stm.init <- function(documents, settings) {
 kappa.init <- function(documents, K, V, A, interactions) {
   kappa.out <- list()
   #Calculate the baseline log-probability (m)
-  freq <- matrix(unlist(documents),nrow=2) #break it into a matrix
+  freq <- Matrix(unlist(documents),nrow=2) #break it into a matrix
   freq <- split(freq[2,], freq[1,]) #shift into list by word type
   m <- unlist(lapply(freq, sum)) #sum over the word types
   m <- m/sum(m)
@@ -139,7 +139,7 @@ kappa.init <- function(documents, K, V, A, interactions) {
   #Create a running sum of the kappa parameters starting with m
   kappa.out$kappasum <- vector(mode="list", length=A)
   for (a in 1:A) {
-    kappa.out$kappasum[[a]] <- matrix(m, nrow=K, ncol=V, byrow=TRUE)
+    kappa.out$kappasum[[a]] <- Matrix(m, nrow=K, ncol=V, byrow=TRUE)
   }
   
   #create covariates. one element per item in parameter list.
