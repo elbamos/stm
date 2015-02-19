@@ -16,11 +16,15 @@ source("./R/STMreport.R")
 library(SparkR)
 # spark.context <- sparkR.init("local", "estep")
 doDebug = TRUE
-spark.context <- sparkR.init(master="spark://ec2-54-84-165-134.compute-1.amazonaws.com:7077", appName = "poli",
-            sparkEnvir=list(spark.executor.memory="4g", 
-                            spark.storage.memoryFraction = "0.1",
-                            spark.serializer="org.apache.spark.serializer.KryoSerializer",
-                            spark.executor.extraJavaOptions="-XX:+UseCompressedOops"))
+spark.env <- list(spark.executor.memory="6g", 
+                  spark.storage.memoryFraction = "0.2",
+#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
+#                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+                  spark.driver.memory="6g", 
+                  spark.driver.maxResultSize = "6g")
+spark.context <- sparkR.init(master="spark://ec2-52-1-82-129.compute-1.amazonaws.com:7077", 
+                             appName = paste0("poli", Sys.time()),
+                             sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 # results <- stm(documents = prep$documents,
 #                vocab = prep$vocab,
 #                data = prep$meta, 
@@ -35,13 +39,13 @@ documents <- poliblog5k.docs
 vocab <- poliblog5k.voc
 meta <- poliblog5k.meta
 poliresults <- stm(documents = documents,
-               vocab = vocab,
-               data = meta, 
-               max.em.its = 200, 
-#               content = ~rating,
-#               prevalence = ~ s(day) + blog,
-               K = 10, spark.context = spark.context, 
-               spark.partitions = 200
+                   vocab = vocab,
+                   data = meta, 
+                   max.em.its = 200, 
+                   content = ~rating,
+                   prevalence = ~ s(day) + blog,
+                   K = 40, spark.context = spark.context, 
+                   spark.partitions = 1000
 )
 save(poliresuls, file="poliresults")
 
