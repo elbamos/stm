@@ -1,0 +1,65 @@
+\name{stm-package}
+\alias{stm-package}
+\docType{package}
+\title{
+Structural Topic Model
+}
+\description{
+This package implements the Structural Topic Model, a general approach to including document-level metadata within mixed-membership topic models. To read the vignette use \code{vignette('stmVignette')}.
+
+Functions to ingest and manipulate documents:
+\code{\link{textProcessor}}
+\code{\link{readCorpus}}
+\code{\link{prepDocuments}}
+
+Functions to fit the model:
+\code{\link{stm}}
+\code{\link{selectModel}}
+\code{\link{manyTopics}}
+
+Functions to summarize a model:
+\code{\link{labelTopics}}
+\code{\link{summary.STM}}
+\code{\link{findThoughts}}
+
+Functions for Post-Estimation:
+\code{\link{estimateEffect}}
+\code{\link{topicCorr}}
+\code{\link{permutationTest}}
+
+Plotting Functions:
+\code{\link{plot.STM}}
+\code{\link{plot.estimateEffect}}
+\code{\link{plot.topicCorr}}
+\code{\link{plot.STMpermute}}
+\code{\link{plotQuote}}
+\code{\link{plotTopicLoess}}
+\code{\link{plotModels}}
+\code{\link{topicQuality}}
+
+Pre-Fit Models and Data:
+\code{\link{gadarian}}
+\code{\link{gadarianFit}}
+\code{\link{poliblog5k}}
+}
+\author{
+Author: Margaret E. Roberts, Brandon M. Stewart and Dustin Tingley
+
+Maintainer: Brandon Stewart <bstewart@fas.harvard.edu>
+}
+\references{
+Roberts, M., Stewart, B., Tingley, D., and Airoldi, E. (2013) "The
+structural topic model and applied social science." In Advances in
+Neural Information Processing Systems Workshop on Topic Models:
+Computation, Application, and Evaluation. http://goo.gl/uHkXAQ
+
+Roberts, M., Stewart, B., Tingley, D., Lucas, C., Leder-Luis, J.,
+Gadarian, S., Albertson, B., Albertson, B. and Rand,
+D. (Forthcoming). "Structural topic models for open ended survey
+responses." American Journal of Political Science http://goo.gl/0x0tHJ
+}
+\keyword{ package }
+\seealso{
+\code{\link{stm}}
+}
+

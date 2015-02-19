@@ -1,0 +1,20 @@
+Package: stm
+Type: Package
+Title: Estimation of the Structural Topic Model
+Version: 1.0.12
+Date: 2015-2-8
+Author: Margaret E. Roberts, Brandon M. Stewart and Dustin Tingley
+Maintainer: Brandon Stewart <bstewart@fas.harvard.edu>
+Depends: R (>= 2.10)
+LinkingTo: Rcpp, RcppArmadillo
+Imports: matrixStats, splines, slam, lda, stringr, Matrix, glmnet,Rcpp
+        (>= 0.11.3)
+Suggests: igraph, SnowballC, tm, huge, clue, wordcloud, KernSmooth, NLP
+LazyData: yes
+Description: The Structural Topic Model (STM) allows researchers 
+  to estimate topic models with document-level covariates. 
+  The package also includes tools for model selection, visualization,
+  and estimation of topic-covariate regressions.
+License: MIT + file LICENSE
+URL: http://structuraltopicmodel.com
+Packaged: 2015-02-10 00:16:19 UTC; Brandon
