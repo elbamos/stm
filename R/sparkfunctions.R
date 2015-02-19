@@ -66,7 +66,12 @@ estep.spark.better <- function(
       # do we really need to braodcast this if its only one matrix?
       
     init <- document$lambda
-    if (doDebug && document$doc.num == 1) print(str(y))
+    if (doDebug && document$doc.num == 1) {
+      print(y)
+      print(str(y))
+      print("environment")
+      print(ls.str())
+    }
     doc <- document$document
     if (!is.numeric(document$mu.i)) {
       print("mu.i")
