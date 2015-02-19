@@ -1,4 +1,5 @@
-doDebug <- TRUE
+doDebug <- FALSE
+if (doDebug) library(pryr)
 
 estep.spark.better <- function( 
   N,
@@ -9,6 +10,7 @@ estep.spark.better <- function(
   mu, 
   sigma, 
   spark.context,
+  spark.partitions,
   verbose) {
   
   print("Entering e-step")
@@ -20,14 +22,21 @@ estep.spark.better <- function(
   #broadcast what we need
   sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
   siginv.broadcast <- broadcast(spark.context, siginv)
+  if (doDebug) {
+    print("sigma")
+    print(object_size(sigma))
+    print("siginv")
+    print(object_size(siginv))
+  }
   
   # setup mu.i
   if (! "Broadcast" %in% class(mu)) {
-    print("cogrouping mu")
+    if (doDebug) print("cogrouping mu")
     estep.rdd <- cogroup(documents.rdd, 
                          mu,
-                         numPartitions = 1L)
+                         numPartitions = spark.partitions)
   } else {
+    mu.carry <- mu
     estep.rdd <- documents.rdd
   }
 
@@ -42,14 +51,15 @@ estep.spark.better <- function(
            doc)
     }
     })
-  estep.rdd <- leftOuterJoin(estep.rdd, beta.rdd, numPartitions = 1L)
+  estep.rdd <- leftOuterJoin(estep.rdd, beta.rdd, numPartitions = spark.partitions)
   # perform logistic normal
-  print("mapping e-step")
+  if (doDebug) print("mapping e-step")
   map(estep.rdd, function(y) {
       document = y[[2]][[1]]
       beta.i <- y[[2]][[2]]
       if(is.null(beta.i)) stop(paste("no beta", str(y)))
-      if ("Broadcast" %in% class(mu)) document$mu.i <- as.numeric(value(mu)) 
+#      if ("Broadcast" %in% class(mu)) document$mu.i <- as.numeric(value(mu)) 
+      if (! is.null(mu.carry)) document$mu.i <- as.numeric(value(mu.carry))
       # do we really need to braodcast this if its only one matrix?
       
     init <- document$lambda
@@ -97,17 +107,25 @@ reduce.beta.nokappa <- function(x) {
   x/rowSums(x)
 }
 
-distribute.beta <- function(beta, spark.context) {
+distribute.beta <- function(beta, spark.context, spark.partitions) {
     index <- 0
+    if (doDebug) {
+      print("beta")
+      print(object_size(beta))
+    }
     betalist <- llply(beta, .fun = function(x) {
       index <<- index + 1
       list(key = index, 
            beta.slice = x)
     })
-    parallelize(spark.context, betalist)
+    parallelize(spark.context, betalist, spark.partitions)
 }
 
-distribute.mu <- function(mu, spark.context) {
+distribute.mu <- function(mu, spark.context, spark.partitions) {
+  if (doDebug) {
+    print("mu")
+    print(object_size(mu$mu))
+  }
   if (is.null(mu$gamma)) {
     mu <- mu$mu
     return(broadcast(spark.context, mu))
@@ -119,12 +137,12 @@ distribute.mu <- function(mu, spark.context) {
                       list(key = index,
                            mu.i <- x)
                     } )
-    return(parallelize(spark.context, mulist))
+    return(parallelize(spark.context, mulist,spark.partitions))
   }
 }
 
 
-mnreg.spark <- function(beta.combined.rdd,settings, spark.context) {
+mnreg.spark <- function(beta.combined.rdd,settings, spark.context, spark.partitions) {
   #Parse Arguments
   A <- settings$dim$A
   K <- settings$dim$K
@@ -139,13 +157,13 @@ mnreg.spark <- function(beta.combined.rdd,settings, spark.context) {
   thresh <- settings$tau$tol
   #Aggregate outcome data.
 #  counts <- do.call(rbind,beta.ss)
-print("getting counts")
+if (doDebug) print("getting counts")
 counts <- reduce(beta.combined.rdd, function(x, y) {
   if ("list" %in% class(x)) x <- x[[2]]
   if ("list" %in% class(y)) y <- y[[2]]
   rbind(x, y)
 }) # but is this the right order???
-print("beta.ss -- If the model completes but the output is funny, the sorting of this matrix is a suspect")
+if (doDebug) print("beta.ss -- If the model completes but the output is funny, the sorting of this matrix is a suspect")
 
 
 #counts <- rbind(beta.ss)
@@ -182,15 +200,14 @@ print("beta.ss -- If the model completes but the output is funny, the sorting of
 
   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
   index <- 0
-  print("distributing counts")
+if (doDebug) print("distributing counts")
   counts.list <- llply(counts, function(x) {
     index <<- index + 1
     list(term = index, value = x)
   })
-  counts.rdd <- parallelize(spark.context, counts.list)
+  counts.rdd <- parallelize(spark.context, counts.list, min(length(counts.list), spark.partitions))
   rm(counts.list)
 
-  
   #########
   #Distributed Poissons
   #########
@@ -211,7 +228,7 @@ print("beta.ss -- If the model completes but the output is funny, the sorting of
 #  ctevery <- ifelse(transposed.length>100, floor(transposed.length/100), 1)
 #  out <- vector(mode="list", length=transposed.length)
   #now iterate over the vocabulary
-  print("Big map")
+if (doDebug) print("Big map")
   mnreg.rdd <- map(counts.rdd, function(x) {
     i <- x[[1]]
     counts.i <- x[[2]]
@@ -238,40 +255,37 @@ print("beta.ss -- If the model completes but the output is funny, the sorting of
     lambda <- which.min(ic)
     coef <- subM(mod$beta,lambda) #return coefficients
     if(is.null(m)) coef <- c(mod$a0[lambda], coef)
-    #    out[[i]] <- coef
 
     c(i,coef)
   })
-  print("going to reduce")
+if (doDebug)  print("going to reduce")
   out <- reduce(mnreg.rdd, cbind) 
-  print("reduced")
+if (doDebug) print("reduced")
   out <- out[,order(out[1,])]
   coef <- out[-1,]
-  print("wrap up the function and redistribute beta")
+if (doDebug)  print("wrap up the function and redistribute beta")
   
   if(!fixedintercept) {
     #if we estimated the intercept add it in
     m <- coef[1,] 
     coef <- coef[-1,]
   }
-  kappa <- split(coef, row(coef)) # NEED TO DEAL WITH THIS -- WILL FAIL RIGHT NOW
+  kappa <- split(coef, row(coef)) 
   ##
   #predictions 
   ##
   #linear predictor
- linpred <- as.matrix(covar%*%coef) #covar needs to be distributed
+ linpred <- as.matrix(covar%*%coef) 
  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
 #softmax
  explinpred <- exp(linpred)
 
-
   beta <- explinpred/rowSums(explinpred)
   beta <- split(beta, rep(1:A, each=K))
 
-
   #wrangle into the list structure
   beta <- lapply(beta, matrix, nrow=K)
-  beta.rdd <- distribute.beta(spark.context = spark.context, beta)
+  beta.rdd <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
 
   kappa <- list(m=m, params=kappa)
   out <- list(beta = beta, kappa=kappa, nlambda=nlambda, beta.rdd = beta.rdd)

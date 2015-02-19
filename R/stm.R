@@ -10,7 +10,8 @@ stm <- function(documents, vocab, K,
                 ngroups=1, model=NULL,
                 gamma.prior=c("Pooled", "L1"), sigma.prior=0,
                 kappa.prior=c("L1", "Jeffreys"), control=list(),
-                spark.context = NULL)  {
+                spark.context = NULL,
+                spark.partitions = NULL)  {
   
   #Match Arguments and save the call
   init.type <- match.arg(init.type)
@@ -214,5 +215,6 @@ stm <- function(documents, vocab, K,
   ###
   # Finally run the actual model
   ###
-  return(stm.control(documents, vocab, settings,model, spark.context))
+  spark.partitions <- as.integer(spark.partitions)
+  return(stm.control(documents, vocab, settings,model, spark.context, spark.partitions))
 }

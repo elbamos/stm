@@ -2,7 +2,7 @@
 #compared to the original we have more initializations, 
 # more explicit options, trimmed fat, memoization
 
-stm.control <- function(documents, vocab, settings, model, spark.context) {
+stm.control <- function(documents, vocab, settings, model, spark.context, spark.partitions = NULL) {
   
   globaltime <- proc.time()
   verbose <- settings$verbose
@@ -62,10 +62,10 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
       )
     })
     names(doclist) <- doc.keys
-    documents.rdd <- parallelize(spark.context, doclist)
+    documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
     rm(doclist)
       
-    beta.rdd <- distribute.beta(beta$beta, spark.context) 
+    beta.rdd <- distribute.beta(beta$beta, spark.context, settings$dim$A) 
     mu <- distribute.mu(mu, spark.context)
   ############
   #Step 2: Run EM
@@ -82,8 +82,9 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
           mu = mu, 
           sigma = sigma, 
           spark.context = spark.context,
+          spark.partitions = spark.partitions,
           verbose) 
-        cache(documents.rdd)
+        persist(documents.rdd, "OFF_HEAP")
 
 
 #         sigma.ss <- suffstats$sigma
@@ -96,7 +97,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
 #                      covar=settings$covariates$X, settings$gamma$enet)
 #         sigma <- opt.sigma(nu=sigma.ss, lambda=lambda, 
 #                            mu=mu$mu, sigprior=settings$sigma$prior)
-        print("Mapping beta.")
+if (doDebug) print("Mapping beta.")
         rm(beta.unreduced.rdd)
         beta.unreduced.rdd <- map(documents.rdd, function(x) {
           list(
@@ -104,34 +105,34 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
                 beta.slice = x$doc.results$beta.slice)
           }
           )
-        print("Combining beta.")
+if (doDebug) print("Combining beta.")
         rm(beta.combined.rdd)
         beta.combined.rdd <- combineByKey(beta.unreduced.rdd, 
                                           createCombiner = function (v) {v}
                                           , mergeValue = "+" 
-                                          , mergeCombiners = "+" , 1L) # need to fix number of partitions
+                                          , mergeCombiners = "+" , settings$dim$A) # need to fix number of partitions
 
         if (is.null(beta$kappa)) {
-          print("Reducing beta.")
+          if (doDebug) print("Reducing beta.")
           beta.rdd <- mapValues(beta.combined.rdd, reduce.beta.nokappa) # there's only one aspect...
           # beta is not being collected here
           betaUncollected <- TRUE
           beta$beta.rdd <- beta.rdd
         }  else {
           if(settings$tau$mode=="L1") {
-            print("mnreg.")
-             beta <- mnreg.spark(beta.combined.rdd, settings, spark.context)
+            if (doDebug) print("mnreg.")
+             beta <- mnreg.spark(beta.combined.rdd, settings, spark.context, spark.partitions)
              beta.rdd <- beta$beta.rdd
             betaUncollected <- FALSE
           } else {
-            print("Reducing beta for jefreys kappa.")
+            if (doDebug) print("Reducing beta for jefreys kappa.")
             beta.ss <- collect(beta.combined.rdd) 
             beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
           }
         }
-        print("Mapping lambda")
+if (doDebug) print("Mapping lambda")
         lambda.rdd <- map(documents.rdd, function(x) {x$doc.results$lambda.output})
-        print("Reducing lambda")
+if (doDebug) print("Reducing lambda")
         lambda <- reduce(lambda.rdd, rbind)
         if(verbose) {
           cat(sprintf("E-Step Definitely Completed Within (%d seconds).  (And probably most of the m-step too.) \n", floor((proc.time()-t1)[3])))
@@ -139,13 +140,13 @@ stm.control <- function(documents, vocab, settings, model, spark.context) {
         }
         lambda <- lambda[order(lambda[,1]),]
         lambda <- lambda[,-1]
-        print("Opt mu")
+if (doDebug) print("Opt mu")
         mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                covar=settings$covariates$X, settings$gamma$enet)
-        mu <- distribute.mu(mu.local, spark.context)
+        mu <- distribute.mu(mu.local, spark.context, spark.partitions)
         sigma.extract.rdd <- map(documents.rdd, function(x) {x$doc.results$eta$nu}) 
         sigma.ss <- reduce(sigma.extract.rdd, "+")
-        print("Opt sigma")
+if (doDebug) print("Opt sigma")
         sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                mu=mu.local$mu, sigprior=settings$sigma$prior)
         
