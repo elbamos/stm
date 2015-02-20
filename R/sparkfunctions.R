@@ -5,7 +5,7 @@ estep.spark.better <- function(
   N,
   V, 
   documents.rdd,
-  beta.rdd,
+  beta.distributed,
   lambda.rdd, 
   mu, 
   sigma, 
@@ -43,35 +43,39 @@ estep.spark.better <- function(
   }
 
   # Join with mu, if necessary, and set the key to 'aspect' so can be joined with beta
-  estep.rdd <- map(estep.rdd, function(x) {
-    if (length(x[[2]]) > 2) {
-      list(aspect = x[[2]]$aspect, document = x[[2]])
-    } else {
-      doc <- x[[2]][[1]][[1]]
-      doc$mu.i <- x[[2]][[2]][[1]]
-      list(aspect = doc$aspect, 
-           doc)
-    }
-    })
+#   estep.rdd <- map(estep.rdd, function(x) {
+#     if (length(x[[2]]) > 2) {
+#       list(aspect = x[[2]]$aspect, document = x[[2]])
+#     } else {
+#       doc <- x[[2]][[1]][[1]]
+#       doc$mu.i <- x[[2]][[2]][[1]]
+#       list(aspect = doc$aspect, 
+#            doc)
+#     }
+#     })
   if (doDebug) print ("join")
-  estep.rdd <- leftOuterJoin(estep.rdd, beta.rdd, numPartitions = spark.partitions)
+#  estep.rdd <- leftOuterJoin(estep.rdd, beta.rdd, numPartitions = spark.partitions)
   # perform logistic normal
   if (doDebug) print("mapping e-step")
   map(estep.rdd, function(y) {
-    if (doDebug) print("inside mapping e-step")
-      document = y[[2]][[1]]
-      beta.i <- y[[2]][[2]]
-      if(is.null(beta.i)) stop(paste("no beta", str(y)))
-#      if ("Broadcast" %in% class(mu)) document$mu.i <- as.numeric(value(mu)) 
-      if (! is.null(mu.carry)) document$mu.i <- as.numeric(value(mu.carry))
-      # do we really need to braodcast this if its only one matrix?
-      
+    if (doDebug) print("inside mapping e-step testing for mu")
     if (doDebug && document$doc.num == 1) {
       print(y)
       print(str(y))
-      print("environment")
-    #  print(ls.str())
     }
+    if (length(x[[2]]) <= 2) {
+      document <- y[[2]][[1]][[1]]
+      document$mu.i <- y[[2]][[2]][[1]]
+    } else {
+      document = y[[2]][[1]]
+#       beta.i <- y[[2]][[2]]
+#       if(is.null(beta.i)) stop(paste("no beta", str(y)))
+#      if ("Broadcast" %in% class(mu)) document$mu.i <- as.numeric(value(mu)) 
+      document$mu.i <- as.numeric(value(mu.carry))
+    }
+    beta.i <- value(beta.broadcast)[[document$aspect]]
+      
+
     doc <- document$document
     if (!is.numeric(document$mu.i)) {
       print("mu.i")
@@ -126,12 +130,13 @@ distribute.beta <- function(beta, spark.context, spark.partitions) {
       print("beta")
       print(object_size(beta))
     }
-    betalist <- llply(beta, .fun = function(x) {
-      index <<- index + 1
-      list(key = index, 
-           beta.slice = x)
-    })
-    parallelize(spark.context, betalist, spark.partitions)
+    broadcast(sc = spark.context, beta)
+#     betalist <- llply(beta, .fun = function(x) {
+#       index <<- index + 1
+#       list(key = index, 
+#            beta.slice = x)
+#     })
+#     parallelize(spark.context, betalist, spark.partitions)
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions) {
@@ -299,9 +304,9 @@ if (doDebug)  print("wrap up the function and redistribute beta")
 
   #wrangle into the list structure
   beta <- lapply(beta, Matrix, nrow=K)
-  beta.rdd <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
+  beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
 
   kappa <- list(m=m, params=kappa)
-  out <- list(beta = beta, kappa=kappa, nlambda=nlambda, beta.rdd = beta.rdd)
+  out <- list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
   return(out)
 }

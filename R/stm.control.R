@@ -66,7 +66,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
     rm(doclist)
       
-    beta.rdd <- distribute.beta(beta$beta, spark.context, settings$dim$A) 
+    beta.distributed <- distribute.beta(beta$beta, spark.context, settings$dim$A) 
     mu <- distribute.mu(mu, spark.context)
     if (doDebug) print("Distributed initial rdd's")
   ############
@@ -80,7 +80,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
           documents.rdd = documents.rdd,
           N = length(documents),
           V = length(vocab),
-          beta.rdd = beta.rdd,
+          beta.distributed = beta.distributed,
           mu = mu, 
           sigma = sigma, 
           spark.context = spark.context,
@@ -119,14 +119,16 @@ if (doDebug) print("Combining beta.")
         if (is.null(beta$kappa)) {
           if (doDebug) print("Reducing beta.")
           beta.rdd <- mapValues(beta.combined.rdd, reduce.beta.nokappa) # there's only one aspect...
+          beta.ss <- collect(beta.rdd)
+          beta.distributed <- broadcast(spark.context, beta.ss)
           # beta is not being collected here
           betaUncollected <- TRUE
-          beta$beta.rdd <- beta.rdd
+          beta$beta.distributed <- beta.distributed
         }  else {
           if(settings$tau$mode=="L1") {
             if (doDebug) print("mnreg.")
              beta <- mnreg.spark(beta.combined.rdd, settings, spark.context, spark.partitions)
-             beta.rdd <- beta$beta.rdd
+             beta.distributed <- beta$beta.distributed
             betaUncollected <- FALSE
           } else {
             if (doDebug) print("Reducing beta for jefreys kappa.")
@@ -175,7 +177,7 @@ if (doDebug) print("Opt sigma")
   #######
   #Step 3: Construct Output
   #######
-  if (betaUncollected) beta$beta <- reduce(beta.rdd, rbind)
+  if (betaUncollected) beta$beta <- rbind(value(beta.distributed))
   time <- (proc.time() - globaltime)[3]
   #convert the beta back to log-space
   beta$logbeta <- beta$beta
@@ -183,7 +185,7 @@ if (doDebug) print("Opt sigma")
     beta$logbeta[[i]] <- log(beta$logbeta[[i]])
   }
   beta$beta <- NULL
-  beta$beta.rdd <- NULL
+  beta$beta.distributed <- NULL
   lambda <- cbind(lambda,0)
   model <- list(mu=mu.local, sigma=sigma, beta=beta, settings=settings,
                 vocab=vocab, convergence=convergence, 
