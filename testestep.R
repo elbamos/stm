@@ -22,20 +22,20 @@ spark.env <- list(spark.executor.memory="6g",
                    spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
                   spark.driver.memory="6g", 
                   spark.driver.maxResultSize = "6g", 
-                  spark.default.parallelism = 1000)
+                  spark.default.parallelism = "1000")
 spark.context <- sparkR.init(master="spark://ec2-54-152-0-140.compute-1.amazonaws.com:7077", 
                              appName = paste0("poli", Sys.time()),
                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 # spark.context = sparkR.init("local")
-# results <- stm(documents = prep$documents,
-#                vocab = prep$vocab,
-#                data = prep$meta, 
-#                max.em.its = 20, 
-#                 content = ~treatment,
-#                 prevalence = ~ pid_rep + MetaID,
-#                K = 4, spark.context = spark.context, 
-#                spark.partitions = 20
-# )
+results <- stm(documents = prep$documents,
+               vocab = prep$vocab,
+               data = prep$meta, 
+               max.em.its = 20, 
+                content = ~treatment,
+                prevalence = ~ pid_rep + MetaID,
+               K = 4, spark.context = spark.context, 
+               spark.partitions = 20
+)
 data(poliblog5k)
 documents <- poliblog5k.docs
 vocab <- poliblog5k.voc

@@ -86,8 +86,8 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
           spark.context = spark.context,
           spark.partitions = spark.partitions,
           verbose) 
-        persist(documents.rdd#, "OFF_HEAP") 
-        ,"MEMORY_ONLY_SER")
+        persist(documents.rdd, "OFF_HEAP") 
+#        ,"MEMORY_ONLY_SER")
         if (doDebug) print("persisted off heap")
 
 

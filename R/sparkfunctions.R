@@ -70,7 +70,7 @@ estep.spark.better <- function(
       print(y)
       print(str(y))
       print("environment")
-      print(ls.str())
+    #  print(ls.str())
     }
     doc <- document$document
     if (!is.numeric(document$mu.i)) {
