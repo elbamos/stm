@@ -105,7 +105,7 @@ estep.spark.better <- function(
 #     doc.results$aspect <- document$aspect
 #     doc.results$lambda <- doc.results$eta$lambda
 
-    beta.slice <- Matrix(FALSE, ncol = V, nrow = nrow(doc.results$phis))
+    beta.slice <- matrix(FALSE, ncol = V, nrow = nrow(doc.results$phis))
     beta.slice[,words] <- beta.slice[,words] + doc.results$phis
     document$beta.slice <- beta.slice
 #     doc.results$beta.slice <- beta.slice
@@ -115,7 +115,7 @@ estep.spark.better <- function(
     }
     document$bound.output <- c(document$doc.num, doc.results$bound)
 if (doDebug) print("finished big map")
-    list(key = doc.results$doc.num, document = document)
+    list(key = document$doc.num, document = document)
   }
   )
 }
@@ -181,7 +181,7 @@ counts <- reduce(beta.combined.rdd, function(x, y) {
   if (doDebug) print("getting a count")
   if ("list" %in% class(x)) x <- x[[2]]
   if ("list" %in% class(y)) y <- y[[2]]
-  rBind(x, y)
+  rbind(x, y)
 }) # but is this the right order???
 if (doDebug) print("beta.ss -- If the model completes but the output is funny, the sorting of this matrix is a suspect")
 
@@ -304,7 +304,7 @@ if (doDebug)  print("wrap up the function and redistribute beta")
   beta <- split(beta, rep(1:A, each=K))
 
   #wrangle into the list structure
-  beta <- lapply(beta, Matrix, nrow=K)
+  beta <- lapply(beta, matrix, nrow=K)
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
 
   kappa <- list(m=m, params=kappa)
