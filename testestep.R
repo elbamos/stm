@@ -30,15 +30,15 @@ spark.context <- sparkR.init(master=master,
                              appName = paste0("poli", Sys.time()),
                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 # spark.context = sparkR.init("local")
-results <- stm(documents = prep$documents,
-               vocab = prep$vocab,
-               data = prep$meta, 
-               max.em.its = 20, 
-                content = ~treatment,
-                prevalence = ~ pid_rep + MetaID,
-               K = 4, spark.context = spark.context, 
-               spark.partitions = 20
-)
+# results <- stm(documents = prep$documents,
+#                vocab = prep$vocab,
+#                data = prep$meta, 
+#                max.em.its = 20, 
+#                 content = ~treatment,
+#                 prevalence = ~ pid_rep + MetaID,
+#                K = 4, spark.context = spark.context, 
+#                spark.partitions = 20
+# )
 data(poliblog5k)
 documents <- poliblog5k.docs
 vocab <- poliblog5k.voc
@@ -48,8 +48,8 @@ poliresults <- stm(documents = documents,
                    data = meta, 
                    max.em.its = 200, 
                     content = ~rating,
-#                    prevalence = ~ s(day) + blog,
-                   K = 5, spark.context = spark.context, # K is what kills heap space
+                    prevalence = ~ s(day) + blog,
+                   K = 40, spark.context = spark.context, # K is what kills heap space
                    spark.partitions = 1000
 )
 save(poliresuls, file="poliresults")
