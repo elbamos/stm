@@ -105,7 +105,7 @@ if (doDebug) print("Mapping beta.")
         rm(beta.unreduced.rdd)
         beta.unreduced.rdd <- map(documents.rdd, function(x) {
           list(
-                key = x$doc.results$aspect, 
+                key = x$document$aspect, 
                 beta.slice = x$document$beta.slice)
           }
           )
@@ -120,7 +120,8 @@ if (doDebug) print("Combining beta.")
           if (doDebug) print("Reducing beta.")
           beta.rdd <- mapValues(beta.combined.rdd, reduce.beta.nokappa) # there's only one aspect...
           print("collecting")
-          beta.ss <- collect(beta.rdd)
+          beta.ss <- collectAsMap(beta.rdd)
+          print(str(beta.ss))
           beta.distributed <- broadcast(spark.context, beta.ss)
           # beta is not being collected here
           betaUncollected <- TRUE
