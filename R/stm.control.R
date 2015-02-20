@@ -54,7 +54,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     index <- 0
     doclist <- llply(documents, .fun = function(x) {
       index <<- index + 1
-      list(key = doc.keys[index], 
+      list(key = betaindex[index], 
            list(key = doc.keys[index], 
                 doc.num = index,
                 document = x,
@@ -62,9 +62,9 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
                 aspect = betaindex[index])
       )
     })
-    names(doclist) <- doc.keys
+#    names(doclist) <- doc.keys
     documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
-    rm(doclist)
+#    rm(doclist)
       
     beta.distributed <- distribute.beta(beta$beta, spark.context, settings$dim$A) 
     mu <- distribute.mu(mu, spark.context)
@@ -88,6 +88,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
           verbose) 
         persist(documents.rdd, "MEMORY_AND_DISK_SER_2") #OFF_HEAP") 
 #        ,"MEMORY_ONLY_SER")
+#        checkpoint(documents.rdd)
         if (doDebug) print("persisted off heap")
 
 
@@ -101,76 +102,65 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
 #                      covar=settings$covariates$X, settings$gamma$enet)
 #         sigma <- opt.sigma(nu=sigma.ss, lambda=lambda, 
 #                            mu=mu$mu, sigprior=settings$sigma$prior)
-if (doDebug) print("Mapping beta.")
+        if (doDebug) print("Mapping beta.")
         rm(beta.unreduced.rdd)
         beta.unreduced.rdd <- map(documents.rdd, function(x) {
           list(
                 key = x$document$aspect, 
-                list(words = x$document$doc[1,],
-                phis = x$document$phis))
+                beta.slice = x$document$beta.slice
+                )
           }
           )
-if (doDebug) print("Combining beta.")
+        if (doDebug) print("Reducing beta.")
         rm(beta.combined.rdd)
-        beta.combined.rdd <- combineByKey(beta.unreduced.rdd, 
-                                          createCombiner = function (v) {
-                                            C <- matrix(0, nrow = nrow(v$phis), ncol=settings$dim$V) 
-                                            C[,v$words] <- C[,v$words] + v$phis
-                                            C
-                                          }
-                                          , mergeValue = function(C, v) {
-                                            C[,v$words] <- C[,v$words] + v$phis
-                                            C
-                                          } 
-                                          , mergeCombiners = "+" , min(spark.partitions, 
-                                                                       settings$dim$A)) # need to fix number of partitions
+        A <- settings$dim$A
+        beta.combined.rdd <- reduceByKey(beta.unreduced.rdd, "+", 
+                                         min(spark.partitions, A)
+                                        ) # need to fix number of partitions
 
         if (is.null(beta$kappa)) {
-          if (doDebug) print("Reducing beta.")
-          beta.rdd <- mapValues(beta.combined.rdd, reduce.beta.nokappa) # there's only one aspect...
-          if (doDebug) print("collecting")
-          beta.ss <- collectAsMap(beta.rdd)
+          beta.ss <- collect(beta.rdd)[[1]]
           if (doDebug) print(str(beta.ss))
+          beta.ss <- beta.ss/rowSums(beta.ss)
           beta.distributed <- broadcast(spark.context, beta.ss)
           # beta is not being collected here
-          betaUncollected <- TRUE
+          beta$beta <- beta.ss
           beta$beta.distributed <- beta.distributed
         }  else {
           if(settings$tau$mode=="L1") {
             if (doDebug) print("mnreg.")
              beta <- mnreg.spark(beta.combined.rdd, settings, spark.context, spark.partitions)
              beta.distributed <- beta$beta.distributed
-             betaUncollected <- FALSE
           } else {
             if (doDebug) print("Reducing beta for jefreys kappa.")
             beta.ss <- collect(beta.combined.rdd) 
             beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
             beta$beta.distributed <- distribute.beta(beta = beta, spark.context, spark.partitions)
-            betaUncollected <- FALSE
+            beta.distributed <- beta$beta.distributed
           }
         }
-if (doDebug) print("Mapping lambda")
+        if (doDebug) print("Mapping lambda")
         lambda.rdd <- map(documents.rdd, function(x) {c(x$document$doc.num, x$document$lambda)})
-if (doDebug) print("Reducing lambda")
+        if (doDebug) print("Reducing lambda")
         lambda <- reduce(lambda.rdd, rbind)
         if(verbose) {
           cat(sprintf("E-Step And Opt Betas and Lambda Definitely Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
           t1 <- proc.time()
         }
-if(doDebug) print(str(lambda))
+        if(doDebug) print(str(lambda))
         lambda <- lambda[order(lambda[,1]),]
         lambda <- lambda[,-1]
-if (doDebug) print("Opt mu")
+        if (doDebug) print("Opt mu")
         mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                covar=settings$covariates$X, settings$gamma$enet)
         mu <- distribute.mu(mu.local, spark.context, spark.partitions)
-        sigma.extract.rdd <- map(documents.rdd, function(x) {x$document$sigma}) 
+        sigma.extract.rdd <- mapValues(documents.rdd, function(x) {x$sigma}) 
         sigma.ss <- reduce(sigma.extract.rdd, "+")
 if (doDebug) print("Opt sigma")
         sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                mu=mu.local$mu, sigprior=settings$sigma$prior)
         
-        bound.extract.rdd <- map(documents.rdd, function(x) {c(x$document$doc.num, x$document$bound)})
+        bound.extract.rdd <- mapValues(documents.rdd, function(x) {c(x$doc.num, x$bound)})
         bound.ss <- reduce(bound.extract.rdd, rbind) 
         bound.ss <- bound.ss[order(bound.ss[,1]),-1]
         bound.ss <- as.vector(bound.ss)
@@ -190,7 +180,6 @@ if (doDebug) print("Opt sigma")
   #######
   #Step 3: Construct Output
   #######
-  if (betaUncollected) beta$beta <- rbind(value(beta.distributed))
   time <- (proc.time() - globaltime)[3]
   #convert the beta back to log-space
   beta$logbeta <- beta$beta

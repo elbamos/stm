@@ -7,7 +7,7 @@ estep.spark.better <- function(
   documents.rdd,
   beta.distributed,
   lambda.rdd, 
-  mu, 
+  mu.distributed, 
   sigma, 
   spark.context,
   spark.partitions,
@@ -31,40 +31,47 @@ estep.spark.better <- function(
   sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
   if (doDebug) print("broadcast sigma")
   
-  # setup mu.i
-  if (! "Broadcast" %in% class(mu)) {
-    if (doDebug) print("cogrouping mu")
-    estep.rdd <- cogroup(documents.rdd, 
-                         mu,
-                         numPartitions = spark.partitions)
-  } else {
-    mu.carry <- mu
-    estep.rdd <- documents.rdd
-  }
+#   # setup mu.i
+#   if (! "Broadcast" %in% class(mu)) {
+#     if (doDebug) print("cogrouping mu")
+#     estep.rdd <- cogroup(documents.rdd, 
+#                          mu,
+#                          numPartitions = spark.partitions)
+#   } else {
+#     mu.carry <- mu
+#     estep.rdd <- documents.rdd
+#   }
+  estep.rdd <- leftOuterJoin(documents.rdd, beta.distributed, spark.partitions)
 
   # perform logistic normal
   if (doDebug) print("mapping e-step")
-  map(estep.rdd, function(y) {
+  mapValues(estep.rdd, function(y) {
     if (doDebug) print("inside mapping e-step testing for mu")
     if (doDebug) {
       print(str(y))
     }
-    if (length(y[[2]]) <= 2) {
-      document <- y[[2]][[1]][[1]]
-      document$mu.i <- y[[2]][[2]][[1]]
-    } else {
-      document = y[[2]]
-      document$mu.i <- as.numeric(value(mu.carry))
-    }
-    beta.i <- value(beta.distributed)[[document$aspect]]
+    document <- y[[1]]
+    beta.i <- y[[2]]
+    mu <- value(mu.distributed)
+    print(str(mu))
+    if (ncol(mu) > 1) mu <- mu[,i]
+    mu <- as.numeric(mu)
+#     if (length(y) <= 2) {
+#       document <- y[[1]][[1]]
+#       document$mu.i <- y[[2]][[1]]
+#     } else {
+#       document = y
+#       document$mu.i <- as.numeric(value(mu.carry))
+#     }
+#     beta.i <- value(beta.distributed)[[document$aspect]]
     
-    doc <- document$document
-    if (!is.numeric(document$mu.i)) {
-      print("mu.i")
-      print(mu.i)
-      print(str(x))
-    }
-    words <- doc[1,]
+#    doc <- document$document
+#     if (!is.numeric(document$mu.i)) {
+#       print("mu.i")
+#       print(mu.i)
+#       print(str(x))
+#     }
+    words <- document$document[1,]
 
     beta.i <- beta.i[,words,drop=FALSE]
     siginv <- value(siginv.broadcast)
@@ -74,23 +81,23 @@ estep.spark.better <- function(
                                         mu = document$mu.i, 
                                         siginv = siginv,
                                         beta = beta.i, 
-                                        doc = doc,
+                                        doc = document$document,
                                         sigmaentropy  = sigmaentropy
     )
     if (doDebug) print("finished logistic normal")
     document$lambda <- doc.results$eta$lambda
     document$sigma <- doc.results$eta$nu
-    document$phis <- doc.results$phis
-#     beta.slice <- matrix(FALSE, ncol = V, nrow = nrow(doc.results$phis))
-#     beta.slice[,words] <- beta.slice[,words] + doc.results$phis
-#    document$beta.slice <- beta.slice
+#    document$phis <- doc.results$phis
+    beta.slice <- matrix(FALSE, ncol = V, nrow = nrow(doc.results$phis))
+    beta.slice[,words] <- beta.slice[,words] + doc.results$phis
+    document$beta.slice <- beta.slice
     if (doDebug) {
 #      document$betachecksum <- sum(beta.slice) 
       document$phi.checksum <- sum(doc.results$phis)
     }
     document$bound <- doc.results$bound
-if (doDebug) print("finished big map")
-    list(key = document$doc.num, document = document)
+    if (doDebug) print("finished big map")
+    document
   }
   )
 }
@@ -105,7 +112,13 @@ distribute.beta <- function(beta, spark.context, spark.partitions) {
       print("beta")
       print(object_size(beta))
     }
-    broadcast(sc = spark.context, beta)
+#    broadcast(sc = spark.context, beta)
+      beta <- llply(beta, function(x) {
+        index <<- index + 1
+        list(key = index, 
+             beta = x)
+      })
+    parallelize(spark.context, beta, length(beta))
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions) {
@@ -113,22 +126,23 @@ distribute.mu <- function(mu, spark.context, spark.partitions) {
     print("mu")
     print(object_size(mu$mu))
   }
-  if (is.null(mu$gamma)) {
+#  if (is.null(mu$gamma)) {
+#    mu <- mu$mu
     mu <- mu$mu
-    return(broadcast(spark.context, mu))
-  } else {
-    index <- 0
-    mulist <- alply(mu$mu, .margins = 2, .dims = TRUE, 
-                    .fun = function(x) {
-                      index <<- index + 1
-                      list(key = index,
-                           mu.i <- x)
-                    } )
-    return(parallelize(spark.context, mulist,spark.partitions))
-  }
+    broadcast(spark.context, mu)#)
+#   } else {
+#     index <- 0
+#     mulist <- alply(mu$mu, .margins = 2, .dims = TRUE, 
+#                     .fun = function(x) {
+#                       index <<- index + 1
+#                       list(key = index,
+#                            mu.i <- x)
+#                     } )
+#     return(parallelize(spark.context, mulist,spark.partitions))
+#   }
 }
 
-
+covar.old <- NULL
 mnreg.spark <- function(beta.combined.rdd,settings, spark.context, spark.partitions) {
   #Parse Arguments
   A <- settings$dim$A
@@ -147,34 +161,40 @@ mnreg.spark <- function(beta.combined.rdd,settings, spark.context, spark.partiti
 if (doDebug) print("getting counts")
 counts <- reduce(beta.combined.rdd, function(x, y) {
   if (doDebug) print("getting a count")
+  print(str(x))
+  print(str(y))
   if ("list" %in% class(x)) x <- x[[2]]
   if ("list" %in% class(y)) y <- y[[2]]
   rbind(x, y)
 }) # but is this the right order???
 if (doDebug) print("beta.ss -- If the model completes but the output is funny, the sorting of this matrix is a suspect")
 
-
-#counts <- rbind(beta.ss)
-  
-  #Three Cases
-  if(A==1) { #Topic Model
-    covar <- diag(1, nrow=K)
+#Three Cases
+if(A==1) { #Topic Model
+  covar <- diag(1, nrow=K)
+}
+if(A!=1) { #Topic-Aspect Models
+  #Topics
+  veci <- 1:nrow(counts)
+  vecj <- rep(1:K,A)
+  #aspects
+  veci <- c(veci,1:nrow(counts))
+  vecj <- c(vecj,rep((K+1):(K+A), each=K))
+  if(interact) {
+    veci <- c(veci, 1:nrow(counts))
+    vecj <- c(vecj, (K+A+1):(K+A+nrow(counts)))
   }
-  if(A!=1) { #Topic-Aspect Models
-    #Topics
-    veci <- 1:nrow(counts)
-    vecj <- rep(1:K,A)
-    #aspects
-    veci <- c(veci,1:nrow(counts))
-    vecj <- c(vecj,rep((K+1):(K+A), each=K))
-    if(interact) {
-      veci <- c(veci, 1:nrow(counts))
-      vecj <- c(vecj, (K+A+1):(K+A+nrow(counts)))
-    }
-    vecv <- rep(1,length(veci))
-    covar <- sparseMatrix(veci, vecj, x=vecv)
-  }  
-  covar.broadcast <- broadcast(spark.context, covar)
+  vecv <- rep(1,length(veci))
+  covar <- sparseMatrix(veci, vecj, x=vecv)
+}  
+if (doDebug) {
+  print("covar comparison")
+  if (! is.null(covar.old)) print(sum(covar - covar.old))
+  covar.old <<- covar
+}
+covar.broadcast <- broadcast(spark.context, covar)
+#counts <- rbind(beta.ss)
+
   
   if(fixedintercept) {  
     m <- settings$dim$wcounts$x
@@ -182,16 +202,20 @@ if (doDebug) print("beta.ss -- If the model completes but the output is funny, t
   } else {
     m <- NULL #have to assign this to null to keep code simpler below
   }
-  
+#  m.broadcast <- broadcast(spark.context, m)
   mult.nobs <- rowSums(counts) #number of multinomial draws in the sample
   offset <- log(mult.nobs)
+  offset.broadcast <- broadcast(spark.context, offset)
 
   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
   index <- 0
 if (doDebug) print("distributing counts")
   counts.list <- llply(counts, function(x) {
     index <<- index + 1
-    list(term = index, value = x)
+    list(term = index, 
+         counts.i = x, 
+         m.i = ifelse(is.null(m), NULL, m[index])
+    )
   })
   counts.rdd <- parallelize(spark.context, counts.list, min(length(counts.list), spark.partitions))
   rm(counts.list)
@@ -217,19 +241,17 @@ if (doDebug) print("distributing counts")
 #  out <- vector(mode="list", length=transposed.length)
   #now iterate over the vocabulary
 if (doDebug) print("Big map")
-  mnreg.rdd <- map(counts.rdd, function(x) {
-    i <- x[[1]]
-    counts.i <- x[[2]]
-    if(is.null(m)) {
-      offset2  <- offset
-    } else {
-      offset2 <- m[i] + offset    
-    }
+  mnreg.rdd <- mapValues(counts.rdd, function(x) {
+    i <- x$term
+    counts.i <- x$couints.i
+    m.i <- ifelse(is.null(x$m.i), 0, x$m.i)
+    offset <- m.i + value(offset.broadcast)
+
     mod <- NULL
     while(is.null(mod)) {
       mod <- tryCatch(glmnet(x=value(covar.broadcast), y=counts.i, family="poisson", 
-                             offset=offset2, standardize=FALSE,
-                             intercept=is.null(m), 
+                             offset=offset, standardize=FALSE,
+                             intercept=is.null(x$m.i), 
                              lambda.min.ratio=lambda.min.ratio,
                              nlambda=nlambda, alpha=alpha,
                              maxit=maxit, thresh=thresh),
@@ -242,9 +264,9 @@ if (doDebug) print("Big map")
     ic <- dev + ic.k*mod$df
     lambda <- which.min(ic)
     coef <- subM(mod$beta,lambda) #return coefficients
-    if(is.null(m)) coef <- c(mod$a0[lambda], coef)
+    if(is.null(x$m.i)) coef <- c(mod$a0[lambda], coef)
 
-    c(i,coef)
+    coef
   })
 if (doDebug)  print("going to reduce")
   out <- reduce(mnreg.rdd, cbind) 
