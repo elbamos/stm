@@ -18,12 +18,15 @@ library(SparkR)
 doDebug = TRUE
 spark.env <- list(spark.executor.memory="6g", 
                   spark.storage.memoryFraction = "0.2",
-                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
+#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                    spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
                   spark.driver.memory="6g", 
                   spark.driver.maxResultSize = "6g", 
                   spark.default.parallelism = "1000")
-spark.context <- sparkR.init(master="spark://ec2-54-152-0-140.compute-1.amazonaws.com:7077", 
+
+master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
+
+spark.context <- sparkR.init(master=master,
                              appName = paste0("poli", Sys.time()),
                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 # spark.context = sparkR.init("local")
