@@ -59,21 +59,21 @@ estep.spark.better <- function(
   if (doDebug) print("mapping e-step")
   map(estep.rdd, function(y) {
     if (doDebug) print("inside mapping e-step testing for mu")
-    if (doDebug && document$doc.num == 1) {
+    if (doDebug && y[[1]] == 1) {
       print(y)
       print(str(y))
     }
-    if (length(x[[2]]) <= 2) {
+    if (length(y[[2]]) <= 2) {
       document <- y[[2]][[1]][[1]]
       document$mu.i <- y[[2]][[2]][[1]]
     } else {
-      document = y[[2]][[1]]
+      document = y[[2]]
 #       beta.i <- y[[2]][[2]]
 #       if(is.null(beta.i)) stop(paste("no beta", str(y)))
 #      if ("Broadcast" %in% class(mu)) document$mu.i <- as.numeric(value(mu)) 
       document$mu.i <- as.numeric(value(mu.carry))
     }
-    beta.i <- value(beta.broadcast)[[document$aspect]]
+    beta.i <- value(beta.distributed)[[document$aspect]]
       
 
     doc <- document$document
