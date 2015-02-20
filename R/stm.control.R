@@ -142,6 +142,7 @@ if (doDebug) print("Reducing lambda")
           cat(sprintf("E-Step Definitely Completed Within (%d seconds).  (And probably most of the m-step too.) \n", floor((proc.time()-t1)[3])))
           t1 <- proc.time()
         }
+if(doDebug) print(str(lambda))
         lambda <- lambda[order(lambda[,1]),]
         lambda <- lambda[,-1]
 if (doDebug) print("Opt mu")
