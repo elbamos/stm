@@ -58,6 +58,7 @@ estep.spark.better <- function(
   # perform logistic normal
   if (doDebug) print("mapping e-step")
   map(estep.rdd, function(y) {
+    if (doDebug) print("inside mapping e-step")
       document = y[[2]][[1]]
       beta.i <- y[[2]][[2]]
       if(is.null(beta.i)) stop(paste("no beta", str(y)))
