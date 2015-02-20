@@ -92,9 +92,9 @@ estep.spark.better <- function(
                                         sigmaentropy  = sigmaentropy
     )
     if (doDebug) print("finished logistic normal")
-    document$lambda <- doc.results$eta.lambda
+    document$lambda <- doc.results$eta$lambda
     document$sigma <- doc.results$eta.nu
-    document$lambda.output <- c(document$doc.num, document$lambda)
+#    document$lambda.output <- c(document$doc.num, document$lambda)
 #     doc.results$doc.num <- document$doc.num
 #     doc.results$key <- document$key
 #     doc.results$document <- doc

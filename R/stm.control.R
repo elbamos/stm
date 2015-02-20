@@ -135,7 +135,7 @@ if (doDebug) print("Combining beta.")
           }
         }
 if (doDebug) print("Mapping lambda")
-        lambda.rdd <- map(documents.rdd, function(x) {x$document$lambda.output})
+        lambda.rdd <- map(documents.rdd, function(x) {c(x$document$doc.num, x$document$lambda)})
 if (doDebug) print("Reducing lambda")
         lambda <- reduce(lambda.rdd, rbind)
         if(verbose) {
