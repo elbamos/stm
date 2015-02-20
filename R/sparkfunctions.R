@@ -42,20 +42,6 @@ estep.spark.better <- function(
     estep.rdd <- documents.rdd
   }
 
-  # Join with mu, if necessary, and set the key to 'aspect' so can be joined with beta
-#   estep.rdd <- map(estep.rdd, function(x) {
-#     if (length(x[[2]]) > 2) {
-#       list(aspect = x[[2]]$aspect, document = x[[2]])
-#     } else {
-#       doc <- x[[2]][[1]][[1]]
-#       doc$mu.i <- x[[2]][[2]][[1]]
-
-#       list(aspect = doc$aspect, 
-#            doc)
-#     }
-#     })
-  if (doDebug) print ("join")
-#  estep.rdd <- leftOuterJoin(estep.rdd, beta.rdd, numPartitions = spark.partitions)
   # perform logistic normal
   if (doDebug) print("mapping e-step")
   map(estep.rdd, function(y) {
@@ -68,14 +54,10 @@ estep.spark.better <- function(
       document$mu.i <- y[[2]][[2]][[1]]
     } else {
       document = y[[2]]
-#       beta.i <- y[[2]][[2]]
-#       if(is.null(beta.i)) stop(paste("no beta", str(y)))
-#      if ("Broadcast" %in% class(mu)) document$mu.i <- as.numeric(value(mu)) 
       document$mu.i <- as.numeric(value(mu.carry))
     }
     beta.i <- value(beta.distributed)[[document$aspect]]
-      
-
+    
     doc <- document$document
     if (!is.numeric(document$mu.i)) {
       print("mu.i")
@@ -98,22 +80,15 @@ estep.spark.better <- function(
     if (doDebug) print("finished logistic normal")
     document$lambda <- doc.results$eta$lambda
     document$sigma <- doc.results$eta$nu
-#    document$lambda.output <- c(document$doc.num, document$lambda)
-#     doc.results$doc.num <- document$doc.num
-#     doc.results$key <- document$key
-#     doc.results$document <- doc
-#     doc.results$aspect <- document$aspect
-#     doc.results$lambda <- doc.results$eta$lambda
-
-    beta.slice <- matrix(FALSE, ncol = V, nrow = nrow(doc.results$phis))
-    beta.slice[,words] <- beta.slice[,words] + doc.results$phis
-    document$beta.slice <- beta.slice
-#     doc.results$beta.slice <- beta.slice
+    document$phis <- doc.results$phis
+#     beta.slice <- matrix(FALSE, ncol = V, nrow = nrow(doc.results$phis))
+#     beta.slice[,words] <- beta.slice[,words] + doc.results$phis
+#    document$beta.slice <- beta.slice
     if (doDebug) {
-      document$betachecksum <- sum(beta.slice) 
+#      document$betachecksum <- sum(beta.slice) 
       document$phi.checksum <- sum(doc.results$phis)
     }
-    document$bound.output <- c(document$doc.num, doc.results$bound)
+    document$bound <- doc.results$bound
 if (doDebug) print("finished big map")
     list(key = document$doc.num, document = document)
   }
@@ -121,7 +96,6 @@ if (doDebug) print("finished big map")
 }
 
 reduce.beta.nokappa <- function(x) {
-  print(str(x))
   x/rowSums(x)
 }
 
@@ -132,12 +106,6 @@ distribute.beta <- function(beta, spark.context, spark.partitions) {
       print(object_size(beta))
     }
     broadcast(sc = spark.context, beta)
-#     betalist <- llply(beta, .fun = function(x) {
-#       index <<- index + 1
-#       list(key = index, 
-#            beta.slice = x)
-#     })
-#     parallelize(spark.context, betalist, spark.partitions)
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions) {

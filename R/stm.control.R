@@ -106,22 +106,31 @@ if (doDebug) print("Mapping beta.")
         beta.unreduced.rdd <- map(documents.rdd, function(x) {
           list(
                 key = x$document$aspect, 
-                beta.slice = x$document$beta.slice)
+                list(words = x$document$doc[1,],
+                phis = x$document$phis))
           }
           )
 if (doDebug) print("Combining beta.")
         rm(beta.combined.rdd)
         beta.combined.rdd <- combineByKey(beta.unreduced.rdd, 
-                                          createCombiner = function (v) {v}
-                                          , mergeValue = "+" 
-                                          , mergeCombiners = "+" , spark.partitions) # need to fix number of partitions
+                                          createCombiner = function (v) {
+                                            C <- matrix(0, nrow = nrow(v$phis), ncol=settings$dim$V) 
+                                            C[,v$words] <- C[,v$words] + v$phis
+                                            C
+                                          }
+                                          , mergeValue = function(C, v) {
+                                            C[,v$words] <- C[,v$words] + v$phis
+                                            C
+                                          } 
+                                          , mergeCombiners = "+" , min(spark.partitions, 
+                                                                       settings$dim$A)) # need to fix number of partitions
 
         if (is.null(beta$kappa)) {
           if (doDebug) print("Reducing beta.")
           beta.rdd <- mapValues(beta.combined.rdd, reduce.beta.nokappa) # there's only one aspect...
-          print("collecting")
+          if (doDebug) print("collecting")
           beta.ss <- collectAsMap(beta.rdd)
-          print(str(beta.ss))
+          if (doDebug) print(str(beta.ss))
           beta.distributed <- broadcast(spark.context, beta.ss)
           # beta is not being collected here
           betaUncollected <- TRUE
@@ -131,11 +140,13 @@ if (doDebug) print("Combining beta.")
             if (doDebug) print("mnreg.")
              beta <- mnreg.spark(beta.combined.rdd, settings, spark.context, spark.partitions)
              beta.distributed <- beta$beta.distributed
-            betaUncollected <- FALSE
+             betaUncollected <- FALSE
           } else {
             if (doDebug) print("Reducing beta for jefreys kappa.")
             beta.ss <- collect(beta.combined.rdd) 
             beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
+            beta$beta.distributed <- distribute.beta(beta = beta, spark.context, spark.partitions)
+            betaUncollected <- FALSE
           }
         }
 if (doDebug) print("Mapping lambda")
@@ -143,7 +154,7 @@ if (doDebug) print("Mapping lambda")
 if (doDebug) print("Reducing lambda")
         lambda <- reduce(lambda.rdd, rbind)
         if(verbose) {
-          cat(sprintf("E-Step Definitely Completed Within (%d seconds).  (And probably most of the m-step too.) \n", floor((proc.time()-t1)[3])))
+          cat(sprintf("E-Step And Opt Betas and Lambda Definitely Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
           t1 <- proc.time()
         }
 if(doDebug) print(str(lambda))
@@ -159,7 +170,7 @@ if (doDebug) print("Opt sigma")
         sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                mu=mu.local$mu, sigprior=settings$sigma$prior)
         
-        bound.extract.rdd <- map(documents.rdd, function(x) {x[[2]]$bound.output})
+        bound.extract.rdd <- map(documents.rdd, function(x) {c(x$document$doc.num, x$document$bound)})
         bound.ss <- reduce(bound.extract.rdd, rbind) 
         bound.ss <- bound.ss[order(bound.ss[,1]),-1]
         bound.ss <- as.vector(bound.ss)
