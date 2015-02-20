@@ -60,8 +60,7 @@ estep.spark.better <- function(
   if (doDebug) print("mapping e-step")
   map(estep.rdd, function(y) {
     if (doDebug) print("inside mapping e-step testing for mu")
-    if (doDebug && y[[1]] == 1) {
-      print(y)
+    if (doDebug) {
       print(str(y))
     }
     if (length(y[[2]]) <= 2) {
