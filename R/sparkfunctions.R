@@ -54,7 +54,7 @@ estep.spark.better <- function(
     }
     })
   if (doDebug) print ("join")
-  estep.rdd <- join(estep.rdd, beta.rdd, numPartitions = spark.partitions)
+  estep.rdd <- leftOuterJoin(estep.rdd, beta.rdd, numPartitions = spark.partitions)
   # perform logistic normal
   if (doDebug) print("mapping e-step")
   map(estep.rdd, function(y) {
