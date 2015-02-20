@@ -49,6 +49,7 @@ estep.spark.better <- function(
 #     } else {
 #       doc <- x[[2]][[1]][[1]]
 #       doc$mu.i <- x[[2]][[2]][[1]]
+
 #       list(aspect = doc$aspect, 
 #            doc)
 #     }
