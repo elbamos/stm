@@ -122,6 +122,7 @@ if (doDebug) print("finished big map")
 }
 
 reduce.beta.nokappa <- function(x) {
+  print(str(x))
   x/rowSums(x)
 }
 

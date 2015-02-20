@@ -119,6 +119,7 @@ if (doDebug) print("Combining beta.")
         if (is.null(beta$kappa)) {
           if (doDebug) print("Reducing beta.")
           beta.rdd <- mapValues(beta.combined.rdd, reduce.beta.nokappa) # there's only one aspect...
+          print("collecting")
           beta.ss <- collect(beta.rdd)
           beta.distributed <- broadcast(spark.context, beta.ss)
           # beta is not being collected here
