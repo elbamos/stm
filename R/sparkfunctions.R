@@ -155,32 +155,10 @@ counts <- reduce(beta.combined.rdd, function(x,y) {
 }) 
 if (doDebug) print(str(counts))
 
-#Three Cases
-if(A==1) { #Topic Model
-  covar <- diag(1, nrow=K)
-}
-if(A!=1) { #Topic-Aspect Models
-  #Topics
-  veci <- 1:nrow(counts)
-  vecj <- rep(1:K,A)
-  #aspects
-  veci <- c(veci,1:nrow(counts))
-  vecj <- c(vecj,rep((K+1):(K+A), each=K))
-  if(interact) {
-    veci <- c(veci, 1:nrow(counts))
-    vecj <- c(vecj, (K+A+1):(K+A+nrow(counts)))
-  }
-  vecv <- rep(1,length(veci))
-  covar <- sparseMatrix(veci, vecj, x=vecv)
-}  
-if (doDebug) {
-  print("covar comparison")
-  if (! is.null(covar.old)) print(sum(covar - covar.old))
-  covar.old <<- covar
-}
-covar.broadcast <- broadcast(spark.context, covar)
-#counts <- rbind(beta.ss)
-
+#
+# Testing showed that covar was a constant -- if this is incorrect please let me know.
+#
+covar.broadcast <- settings$covar.broadcast
   
   if(fixedintercept) {  
     m <- settings$dim$wcounts$x
@@ -282,7 +260,7 @@ if (doDebug)  print("wrap up the function and redistribute beta")
   #predictions 
   ##
   #linear predictor
- linpred <- as.matrix(covar%*%coef) 
+ linpred <- as.matrix(settings$covar%*%coef) 
  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
 #softmax
  explinpred <- exp(linpred)

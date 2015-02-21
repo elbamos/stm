@@ -62,12 +62,35 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
                 aspect = betaindex[index])
       )
     })
-#    names(doclist) <- doc.keys
     documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
-#    rm(doclist)
       
     beta.distributed <- distribute.beta(beta$beta, spark.context, settings$dim$A) 
     mu <- distribute.mu(mu, spark.context)
+    
+  #The covariate matrix
+  rows <- settings$dim$A * settings$dim$K
+  if(settings$dim$A==1) { #Topic Model
+    covar <- diag(1, nrow=settings$dim$K)
+  }
+  if(settings$dim$A!=1) { #Topic-Aspect Models
+    #Topics
+    veci <- 1:rows
+    vecj <- rep(1:settings$dim$K,settings$dim$A)
+    #aspects
+    veci <- c(veci,1:rows)
+    vecj <- c(vecj,rep((settings$dim$K+1):(settings$dim$K+settings$dim$A), each=settings$dim$K))
+    if(settings$kappa$interactions) {
+      veci <- c(veci, 1:rows)
+      vecj <- c(vecj, (settings$dim$K+settings$dim$A+1):(settings$dim$K+settings$dim$A+rows))
+    }
+    vecv <- rep(1,length(veci))
+    covar <- sparseMatrix(veci, vecj, x=vecv)
+  }  
+  settings$covar <- covar
+  settings$covar.broadcast <- broadcast(spark.context, covar)  
+  
+  
+  
     if (doDebug) print("Distributed initial rdd's")
   ############
   #Step 2: Run EM
