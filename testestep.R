@@ -13,12 +13,12 @@ source("./R/STMreport.R")
 
 library(SparkR)
 
-spark.env <- list(spark.executor.memory="6g", 
+spark.env <- list(spark.executor.memory="14g", 
                   spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-                  spark.driver.memory="6g", 
-                  spark.driver.maxResultSize = "6g"
+                  spark.driver.memory="14g", 
+                  spark.driver.maxResultSize = "14g"
                  ,spark.default.parallelism = "100"
                  ,spark.rdd.compress="true"
 )
