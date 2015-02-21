@@ -54,7 +54,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     index <- 0
     doclist <- llply(documents, .fun = function(x) {
       index <<- index + 1
-      list(key = betaindex[index], 
+      list(key = betaindex[index, 
            list(key = doc.keys[index], 
                 doc.num = index,
                 document = x,
