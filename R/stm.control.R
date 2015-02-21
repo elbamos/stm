@@ -92,29 +92,19 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
         if (doDebug) print("persisted off heap")
 
 
-#         sigma.ss <- suffstats$sigma
-#         lambda <- suffstats$lambda
-#         beta.ss <- suffstats$beta
-#         bound.ss <- suffstats$bound
-#         #do the m-step
-#         beta <- opt.beta(beta.ss, beta$kappa, settings)
-#         mu <- opt.mu(lambda=lambda, mode=settings$gamma$mode, 
-#                      covar=settings$covariates$X, settings$gamma$enet)
-#         sigma <- opt.sigma(nu=sigma.ss, lambda=lambda, 
-#                            mu=mu$mu, sigprior=settings$sigma$prior)
         if (doDebug) print("Mapping beta.")
         rm(beta.unreduced.rdd)
         beta.unreduced.rdd <- map(documents.rdd, function(x) {
           list(
-                key = x$document$aspect, 
-                beta.slice = x$document$beta.slice
+                key = x[[2]]$aspect, 
+                beta.slice = x[[2]]$beta.slice
                 )
           }
           )
         if (doDebug) print("Reducing beta.")
         rm(beta.combined.rdd)
         A <- settings$dim$A
-        beta.combined.rdd <- reduceByKey(beta.unreduced.rdd, "+", 
+        beta.combined.rdd <- reduceByKey(beta.unreduced.rdd,  "+", 
                                          min(spark.partitions, A)
                                         ) # need to fix number of partitions
 
@@ -140,7 +130,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
           }
         }
         if (doDebug) print("Mapping lambda")
-        lambda.rdd <- map(documents.rdd, function(x) {c(x$document$doc.num, x$document$lambda)})
+        lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
         if (doDebug) print("Reducing lambda")
         lambda <- reduce(lambda.rdd, rbind)
         if(verbose) {
@@ -153,15 +143,25 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
         if (doDebug) print("Opt mu")
         mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                covar=settings$covariates$X, settings$gamma$enet)
+        if (doDebug) print(str(mu.local))
         mu <- distribute.mu(mu.local, spark.context, spark.partitions)
+        if (doDebug) print("Extract sigma")
         sigma.extract.rdd <- mapValues(documents.rdd, function(x) {x$sigma}) 
-        sigma.ss <- reduce(sigma.extract.rdd, "+")
+        sigma.ss <- reduce(sigma.extract.rdd, function(x, y) {
+          if ("list" %in% class(x)) x <- x[[2]]
+          if ("list" %in% class(y)) y <- y[[2]]
+          x + y
+        })
 if (doDebug) print("Opt sigma")
         sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                mu=mu.local$mu, sigprior=settings$sigma$prior)
         
         bound.extract.rdd <- mapValues(documents.rdd, function(x) {c(x$doc.num, x$bound)})
-        bound.ss <- reduce(bound.extract.rdd, rbind) 
+        bound.ss <- reduce(bound.extract.rdd, function(x, y) {
+          if ("list" %in% class(x)) x <- x[[2]]
+          if ("list" %in% class(y)) y <- y[[2]]
+          rbind(x, y)
+        }) 
         bound.ss <- bound.ss[order(bound.ss[,1]),-1]
         bound.ss <- as.vector(bound.ss)
         if (verbose) cat(sprintf("Completed M-Step (%d seconds). \n", floor(proc.time()-t1)[3]))

@@ -47,38 +47,25 @@ estep.spark.better <- function(
   if (doDebug) print("mapping e-step")
   mapValues(estep.rdd, function(y) {
     if (doDebug) print("inside mapping e-step testing for mu")
-    if (doDebug) {
+    if (doDebug && y[[1]]$doc.num == 1) {
       print(str(y))
     }
     document <- y[[1]]
     beta.i <- y[[2]]
     mu <- value(mu.distributed)
-    print(str(mu))
-    if (ncol(mu) > 1) mu <- mu[,i]
-    mu <- as.numeric(mu)
-#     if (length(y) <= 2) {
-#       document <- y[[1]][[1]]
-#       document$mu.i <- y[[2]][[1]]
-#     } else {
-#       document = y
-#       document$mu.i <- as.numeric(value(mu.carry))
-#     }
-#     beta.i <- value(beta.distributed)[[document$aspect]]
-    
-#    doc <- document$document
-#     if (!is.numeric(document$mu.i)) {
-#       print("mu.i")
-#       print(mu.i)
-#       print(str(x))
-#     }
-    words <- document$document[1,]
+    if (ncol(mu) > 1) {
+      mu.i <- mu[,document$doc.num]
+    } else {
+      mu.i <- as.numeric(mu)
+    }
 
+    words <- document$document[1,]
     beta.i <- beta.i[,words,drop=FALSE]
     siginv <- value(siginv.broadcast)
     sigmaentropy <- value(sigmaentropy.broadcast)
 
     doc.results <- stm:::logisticnormal(eta = document$lambda, 
-                                        mu = document$mu.i, 
+                                        mu = mu.i, 
                                         siginv = siginv,
                                         beta = beta.i, 
                                         doc = document$document,
@@ -159,15 +146,14 @@ mnreg.spark <- function(beta.combined.rdd,settings, spark.context, spark.partiti
   #Aggregate outcome data.
 #  counts <- do.call(rbind,beta.ss)
 if (doDebug) print("getting counts")
-counts <- reduce(beta.combined.rdd, function(x, y) {
-  if (doDebug) print("getting a count")
-  print(str(x))
-  print(str(y))
+beta.combined.rdd <- sortByKey(beta.combined.rdd)
+# counts is (K * A) x V
+counts <- reduce(beta.combined.rdd, function(x,y) {
   if ("list" %in% class(x)) x <- x[[2]]
   if ("list" %in% class(y)) y <- y[[2]]
   rbind(x, y)
-}) # but is this the right order???
-if (doDebug) print("beta.ss -- If the model completes but the output is funny, the sorting of this matrix is a suspect")
+}) 
+if (doDebug) print(str(counts))
 
 #Three Cases
 if(A==1) { #Topic Model
@@ -208,16 +194,20 @@ covar.broadcast <- broadcast(spark.context, covar)
   offset.broadcast <- broadcast(spark.context, offset)
 
   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
+
   index <- 0
 if (doDebug) print("distributing counts")
   counts.list <- llply(counts, function(x) {
     index <<- index + 1
-    list(term = index, 
-         counts.i = x, 
-         m.i = ifelse(is.null(m), NULL, m[index])
+    list(key = index, 
+         list(
+           term = index, 
+          counts.i = x, 
+          m.i = ifelse(is.null(m), NULL, m[index])
+         )
     )
   })
-  counts.rdd <- parallelize(spark.context, counts.list, min(length(counts.list), spark.partitions))
+  counts.rdd <- parallelize(spark.context, counts.list, min(spark.partitions, length(counts.list)))
   rm(counts.list)
 
   #########
@@ -243,7 +233,7 @@ if (doDebug) print("distributing counts")
 if (doDebug) print("Big map")
   mnreg.rdd <- mapValues(counts.rdd, function(x) {
     i <- x$term
-    counts.i <- x$couints.i
+    counts.i <- x$counts.i
     m.i <- ifelse(is.null(x$m.i), 0, x$m.i)
     offset <- m.i + value(offset.broadcast)
 
@@ -268,11 +258,18 @@ if (doDebug) print("Big map")
 
     coef
   })
+mnreg.rdd <- sortByKey(mnreg.rdd)
 if (doDebug)  print("going to reduce")
-  out <- reduce(mnreg.rdd, cbind) 
+coef <- reduce(mnreg.rdd, function(x,y) {
+  if ("list" %in% class(x)) x <- x[[2]]
+  if ("list" %in% class(y)) y <- y[[2]]
+  cbind(x, y)
+}) 
+
+
+  print(str(coef))
 if (doDebug) print("reduced")
-  out <- out[,order(out[1,])]
-  coef <- out[-1,]
+
 if (doDebug)  print("wrap up the function and redistribute beta")
   
   if(!fixedintercept) {

@@ -39,7 +39,7 @@ results <- stm(documents = prep$documents,
                 content = ~treatment,
                 prevalence = ~ pid_rep + MetaID,
                K = 4, spark.context = spark.context, 
-               spark.partitions = 200
+               spark.partitions = 1
 )
 # data(poliblog5k)
 # documents <- poliblog5k.docs
