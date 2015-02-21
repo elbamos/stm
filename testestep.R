@@ -19,7 +19,8 @@ spark.env <- list(spark.executor.memory="6g",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
                   spark.driver.memory="6g", 
                   spark.driver.maxResultSize = "6g"
-                 ,spark.default.parallelism = "1000"
+                 ,spark.default.parallelism = "100"
+                 ,spark.rdd.compress="true"
 )
 
 master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)

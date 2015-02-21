@@ -216,6 +216,8 @@ stm <- function(documents, vocab, K,
   }
   
   settings$call <- Call
+
+
   ###
   # Finally run the actual model
   ###

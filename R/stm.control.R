@@ -132,7 +132,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
                                         ) # need to fix number of partitions
 
         if (is.null(beta$kappa)) {
-          beta.ss <- collect(beta.rdd)[[1]]
+          beta.ss <- collect(beta.combined.rdd)[[1]]
           if (doDebug) print(str(beta.ss))
           beta.ss <- beta.ss/rowSums(beta.ss)
           beta.distributed <- broadcast(spark.context, beta.ss)
