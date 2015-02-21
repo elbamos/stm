@@ -41,17 +41,17 @@ estep.spark.better <- function(
 #     mu.carry <- mu
 #     estep.rdd <- documents.rdd
 #   }
-  estep.rdd <- leftOuterJoin(documents.rdd, beta.distributed, spark.partitions)
+ # estep.rdd <- leftOuterJoin(documents.rdd, beta.distributed, spark.partitions)
 
   # perform logistic normal
   if (doDebug) print("mapping e-step")
-  mapValues(estep.rdd, function(y) {
+  mapValues(documents.rdd, function(y) {
     if (doDebug) print("inside mapping e-step testing for mu")
     if (doDebug && y[[1]]$doc.num == 1) {
       print(str(y))
     }
-    document <- y[[1]]
-    beta.i <- y[[2]]
+    document <- y
+    beta.i <- value(beta.distributed)[[y$aspect]]
     mu <- value(mu.distributed)
     if (ncol(mu) > 1) {
       mu.i <- mu[,document$doc.num]
@@ -99,13 +99,13 @@ distribute.beta <- function(beta, spark.context, spark.partitions) {
       print("beta")
       print(object_size(beta))
     }
-#    broadcast(sc = spark.context, beta)
-      beta <- llply(beta, function(x) {
-        index <<- index + 1
-        list(key = index, 
-             beta = x)
-      })
-    parallelize(spark.context, beta, length(beta))
+   broadcast(sc = spark.context, beta)
+#       beta <- llply(beta, function(x) {
+#         index <<- index + 1
+#         list(key = index, 
+#              beta = x)
+#       })
+#     parallelize(spark.context, beta, length(beta))
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions) {
