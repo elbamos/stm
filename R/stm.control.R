@@ -64,7 +64,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     })
     documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
       
-    beta.distributed <- distribute.beta(beta$beta, spark.context, settings$dim$A) 
+    beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
     mu <- distribute.mu(mu, spark.context)
     
   #The covariate matrix

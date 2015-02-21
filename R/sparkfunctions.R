@@ -245,7 +245,7 @@ coef <- reduce(mnreg.rdd, function(x,y) {
 }) 
 
 
-  print(str(coef))
+#  print(str(coef))
 if (doDebug) print("reduced")
 
 if (doDebug)  print("wrap up the function and redistribute beta")
