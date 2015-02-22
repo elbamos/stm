@@ -8,7 +8,7 @@ source("./R/stm.R")
 source("./R/stm.control.R")
 source("./R/STMconvergence.R")
 source("./R/STMreport.R")
-# /usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=c3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 15 -a ami-8e0352e6 launch vanillaspark
+#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=c3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 15 -a ami-8e0352e6 launch vanillaspark
 
 
 library(SparkR)
@@ -27,12 +27,12 @@ spark.env <- list(spark.executor.memory="13g",
 # spark.context <- sparkR.init(master=master,
 #                              appName = paste0("poli", Sys.time()),
 #                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
-doDebug <- FALSE
+#doDebug <- TRUE
 spark.context = sparkR.init("local")
 
 
 data(gadarian)
-gadarian <- gadarian[1:25,]
+#gadarian <- gadarian[1:25,]
 
 corpus <- textProcessor(gadarian$open.ended.response)
 prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
