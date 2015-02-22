@@ -44,29 +44,29 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   betaindex <- settings$covariates$betaindex
   stopits <- FALSE
   
-
-    includePackage(spark.context, "glmnet")
-    includePackage(spark.context, "plyr")
-    includePackage(spark.context, "Matrix")
-    # if we change documents to have a key as the first element, then we can use an RDD
-    if (is.null(names(documents))) names(documents) <- 1:length(documents)
-    doc.keys <- names(documents)
-    index <- 0
-    doclist <- llply(documents, .fun = function(x) {
-      index <<- index + 1
-      list(key = betaindex[index], 
-           list(key = doc.keys[index], 
-                doc.num = index,
-                document = x,
-                lambda = lambda[index,],
-                aspect = betaindex[index])
-      )
-    })
-    documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
-      
-    beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
-    mu <- distribute.mu(mu, spark.context)
-    
+  
+  includePackage(spark.context, "glmnet")
+  includePackage(spark.context, "plyr")
+  includePackage(spark.context, "Matrix")
+  # if we change documents to have a key as the first element, then we can use an RDD
+  if (is.null(names(documents))) names(documents) <- 1:length(documents)
+  doc.keys <- names(documents)
+  index <- 0
+  doclist <- llply(documents, .fun = function(x) {
+    index <<- index + 1
+    list(key = betaindex[index], 
+         list(key = doc.keys[index], 
+              doc.num = index,
+              document = x,
+              lambda = lambda[index,],
+              aspect = betaindex[index])
+    )
+  })
+  documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
+  
+  beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
+  mu <- distribute.mu(mu, spark.context)
+  
   #The covariate matrix
   rows <- settings$dim$A * settings$dim$K
   if(settings$dim$A==1) { #Topic Model
@@ -91,115 +91,115 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   
   
   
-    if (doDebug) print("Distributed initial rdd's")
+  if (doDebug) print("Distributed initial rdd's")
   ############
   #Step 2: Run EM
   ############
   while(!stopits) {
-        t1 <- proc.time()
-        if (verbose) cat("Distributing E-Step\t")
-        documents.old.rdd <- documents.rdd
-        documents.rdd <- estep.spark.better( 
-          documents.rdd = documents.rdd,
-          N = length(documents),
-          V = length(vocab),
-          beta.distributed = beta.distributed,
-          mu = mu, 
-          sigma = sigma, 
-          spark.context = spark.context,
-          spark.partitions = spark.partitions,
-          verbose) 
-        persist(documents.rdd, "MEMORY_AND_DISK_SER_2") #OFF_HEAP") 
-#        ,"MEMORY_ONLY_SER")
-#        checkpoint(documents.rdd)
-        if (doDebug) print("persisted off heap")
-
-
-        if (doDebug) print("Mapping beta.")
-        rm(beta.unreduced.rdd)
-        beta.unreduced.rdd <- map(documents.rdd, function(x) {
-          list(
-                key = x[[2]]$aspect, 
-                beta.slice = x[[2]]$beta.slice
-                )
-          }
-          )
-        if (doDebug) print("Reducing beta.")
-        rm(beta.combined.rdd)
-        A <- settings$dim$A
-        beta.combined.rdd <- reduceByKey(beta.unreduced.rdd,  "+", 
-                                         min(spark.partitions, A)
-                                        ) # need to fix number of partitions
-
-        if (is.null(beta$kappa)) {
-          beta.ss <- collect(beta.combined.rdd)[[1]]
-          if (doDebug) print(str(beta.ss))
-          beta.ss <- beta.ss/rowSums(beta.ss)
-          beta.distributed <- broadcast(spark.context, beta.ss)
-          # beta is not being collected here
-          beta$beta <- beta.ss
-          beta$beta.distributed <- beta.distributed
-        }  else {
-          if(settings$tau$mode=="L1") {
-            if (doDebug) print("mnreg.")
-             beta <- mnreg.spark(beta.combined.rdd, settings, spark.context, spark.partitions)
-             beta.distributed <- beta$beta.distributed
-          } else {
-            if (doDebug) print("Reducing beta for jefreys kappa.")
-            beta.ss <- collect(beta.combined.rdd) 
-            beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
-            beta$beta.distributed <- distribute.beta(beta = beta, spark.context, spark.partitions)
-            beta.distributed <- beta$beta.distributed
-          }
-        }
-        if (doDebug) print("Mapping lambda")
-        lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
-        if (doDebug) print("Reducing lambda")
-        lambda <- reduce(lambda.rdd, rbind)
-        if(verbose) {
-          cat(sprintf("E-Step And Opt Betas and Lambda Definitely Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
-          t1 <- proc.time()
-        }
-        if(doDebug) print(str(lambda))
-        lambda <- lambda[order(lambda[,1]),]
-        lambda <- lambda[,-1]
-        if (doDebug) print("Opt mu")
-        mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
-               covar=settings$covariates$X, settings$gamma$enet)
-        if (doDebug) print(str(mu.local))
-        mu <- distribute.mu(mu.local, spark.context, spark.partitions)
-        if (doDebug) print("Extract sigma")
-        sigma.extract.rdd <- mapValues(documents.rdd, function(x) {x$sigma}) 
-        sigma.ss <- reduce(sigma.extract.rdd, function(x, y) {
-          if ("list" %in% class(x)) x <- x[[2]]
-          if ("list" %in% class(y)) y <- y[[2]]
-          x + y
-        })
-if (doDebug) print("Opt sigma")
-        sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
-               mu=mu.local$mu, sigprior=settings$sigma$prior)
-        
-        bound.extract.rdd <- mapValues(documents.rdd, function(x) {c(x$doc.num, x$bound)})
-        bound.ss <- reduce(bound.extract.rdd, function(x, y) {
-          if ("list" %in% class(x)) x <- x[[2]]
-          if ("list" %in% class(y)) y <- y[[2]]
-          rbind(x, y)
-        }) 
-        bound.ss <- bound.ss[order(bound.ss[,1]),-1]
-        bound.ss <- as.vector(bound.ss)
-        if (verbose) cat(sprintf("Completed M-Step (%d seconds). \n", floor(proc.time()-t1)[3]))
-        
+    t1 <- proc.time()
+    if (verbose) cat("Distributing E-Step\t")
+    documents.old.rdd <- documents.rdd
+    documents.rdd <- estep.spark.better( 
+      documents.rdd = documents.rdd,
+      N = length(documents),
+      V = length(vocab),
+      beta.distributed = beta.distributed,
+      mu = mu, 
+      sigma = sigma, 
+      spark.context = spark.context,
+      spark.partitions = spark.partitions,
+      verbose) 
+    persist(documents.rdd, "MEMORY_AND_DISK_SER_2") #OFF_HEAP") 
+    #        ,"MEMORY_ONLY_SER")
+    #        checkpoint(documents.rdd)
+    toss <- takeSample(documents.rdd, FALSE, 5L, 1L)
+    rm(toss)
+    if(verbose) {
+      cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
+      t1 <- proc.time()
+    }
+    
+    if (doDebug) print("Mapping beta.")
+    rm(beta.unreduced.rdd)
+    beta.unreduced.rdd <- map(documents.rdd, function(x) {
+      list(
+        key = x[[2]]$aspect, 
+        beta.slice = x[[2]]$beta.slice
+      )
+    }
+    )
+    if (doDebug) print("Reducing beta.")
+    rm(beta.combined.rdd)
+    A <- settings$dim$A
+    beta.combined.rdd <- reduceByKey(beta.unreduced.rdd,  "+", 
+                                     min(spark.partitions, A)
+    ) # need to fix number of partitions
+    
+    if (is.null(beta$kappa)) {
+      beta.ss <- collect(beta.combined.rdd)[[1]]
+      if (doDebug) print(str(beta.ss))
+      beta.ss <- beta.ss/rowSums(beta.ss)
+      beta.distributed <- broadcast(spark.context, beta.ss)
+      # beta is not being collected here
+      beta$beta <- beta.ss
+      beta$beta.distributed <- beta.distributed
+    }  else {
+      if(settings$tau$mode=="L1") {
+        if (doDebug) print("mnreg.")
+        beta <- mnreg.spark(beta.combined.rdd, settings, spark.context, spark.partitions)
+        beta.distributed <- beta$beta.distributed
+      } else {
+        if (doDebug) print("Reducing beta for jefreys kappa.")
+        beta.ss <- collect(beta.combined.rdd) 
+        beta <- stm:::jeffreysKappa(beta.ss, kappa, settings) 
+        beta$beta.distributed <- distribute.beta(beta = beta, spark.context, spark.partitions)
+        beta.distributed <- beta$beta.distributed
+      }
+    }
+    if (doDebug) print("Mapping lambda")
+    lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
+    if (doDebug) print("Reducing lambda")
+    lambda <- reduce(lambda.rdd, rbind)
+    if(doDebug) print(str(lambda))
+    lambda <- lambda[order(lambda[,1]),]
+    lambda <- lambda[,-1]
+    if (doDebug) print("Opt mu")
+    mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
+                             covar=settings$covariates$X, settings$gamma$enet)
+    if (doDebug) print(str(mu.local))
+    mu <- distribute.mu(mu.local, spark.context, spark.partitions)
+    if (doDebug) print("Extract sigma")
+    sigma.extract.rdd <- mapValues(documents.rdd, function(x) {x$sigma}) 
+    sigma.ss <- reduce(sigma.extract.rdd, function(x, y) {
+      if ("list" %in% class(x)) x <- x[[2]]
+      if ("list" %in% class(y)) y <- y[[2]]
+      x + y
+    })
+    if (doDebug) print("Opt sigma")
+    sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
+                             mu=mu.local$mu, sigprior=settings$sigma$prior)
+    
+    bound.extract.rdd <- mapValues(documents.rdd, function(x) {c(x$doc.num, x$bound)})
+    bound.ss <- reduce(bound.extract.rdd, function(x, y) {
+      if ("list" %in% class(x)) x <- x[[2]]
+      if ("list" %in% class(y)) y <- y[[2]]
+      rbind(x, y)
+    }) 
+    bound.ss <- bound.ss[order(bound.ss[,1]),-1]
+    bound.ss <- as.vector(bound.ss)
+    if (verbose) cat(sprintf("Completed M-Step (%d seconds). \n", floor(proc.time()-t1)[3]))
+    
     #Convergence
     convergence <- stm:::convergence.check(bound.ss, convergence, settings)
     stopits <- convergence$stopits
-
+    
     #Print Updates if we haven't yet converged
     # The report function won't work properly if there's no content covariate because beta hasn't been recovered
     if(!stopits & verbose) stm:::report(convergence, ntokens=ntokens, beta, vocab, 
-                                       settings$topicreportevery, verbose)
+                                        settings$topicreportevery, verbose)
     unpersist(documents.old.rdd)
   }
-
+  
   #######
   #Step 3: Construct Output
   #######
@@ -223,6 +223,6 @@ if (doDebug) print("Opt sigma")
 
 
 
-    
+
 
 
