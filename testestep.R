@@ -13,12 +13,12 @@ source("./R/STMreport.R")
 
 library(SparkR)
 
-spark.env <- list(spark.executor.memory="13g", 
+spark.env <- list(spark.executor.memory="6g", 
                   spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-                  spark.driver.memory="13g", 
-                  spark.driver.maxResultSize = "13g"
+                  spark.driver.memory="6g", 
+                  spark.driver.maxResultSize = "6g"
                  ,spark.rdd.compress="true"
 )
 
@@ -34,31 +34,31 @@ spark.context = sparkR.init("local")
 data(gadarian)
 #gadarian <- gadarian[1:25,]
 
-corpus <- textProcessor(gadarian$open.ended.response)
-prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
-results <- stm(documents = prep$documents,
-               vocab = prep$vocab,
-               data = prep$meta, 
-               max.em.its = 20, 
-                content = ~treatment,
-                prevalence = ~ pid_rep + MetaID,
-               K = 4, spark.context = spark.context, 
-               spark.partitions = 120
-)
-# data(poliblog5k)
-# documents <- poliblog5k.docs
-# vocab <- poliblog5k.voc
-# meta <- poliblog5k.meta
-# poliresults <- stm(documents = documents,
-#                    vocab = vocab,
-#                    data = meta, 
-#                    max.em.its = 200, 
-#                     content = ~rating,
-#                     prevalence = ~ s(day) + blog,
-#                    K = 10, spark.context = spark.context, 
-#                    spark.partitions = 5000
+# corpus <- textProcessor(gadarian$open.ended.response)
+# prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
+# results <- stm(documents = prep$documents,
+#                vocab = prep$vocab,
+#                data = prep$meta, 
+#                max.em.its = 20, 
+#                 content = ~treatment,
+#                 prevalence = ~ pid_rep + MetaID,
+#                K = 4, spark.context = spark.context, 
+#                spark.partitions = 120
 # )
-# save(poliresuls, file="poliresults")
+data(poliblog5k)
+documents <- poliblog5k.docs
+vocab <- poliblog5k.voc
+meta <- poliblog5k.meta
+poliresults <- stm(documents = documents,
+                   vocab = vocab,
+                   data = meta, 
+                   max.em.its = 200, 
+                    content = ~rating,
+                    prevalence = ~ s(day) + blog,
+                   K = 10, spark.context = spark.context, 
+                   spark.partitions = 600
+)
+save(poliresuls, file="poliresults")
 
 
 
