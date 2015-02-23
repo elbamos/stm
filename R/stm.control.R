@@ -54,12 +54,12 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   index <- 0
   doclist <- llply(documents, .fun = function(x) {
     index <<- index + 1
-#    list(key = betaindex[index], 
+    list(key = index, 
          list(key = doc.keys[index], 
               doc.num = index,
               document = x,
               aspect = betaindex[index])
- #   )
+    )
   })
   documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
   if (doDebug) print("Distributed documents")

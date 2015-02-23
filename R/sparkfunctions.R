@@ -53,9 +53,9 @@ estep.spark.partition <- function(
     siginv <- value(siginv.broadcast)
     sigmaentropy <- value(sigmaentropy.broadcast)
     for (combined in part) {
-      if (doDebug) print(str(part))
-      document <- part[[1]]
-      init <- part[[2]]
+      if (doDebug) print(str(combined))
+      document <- combined[[2]][[1]][[1]]
+      init <- combined[[2]][[2]][[1]]
       beta.i <- beta.in[[document$aspect]]
       if (ncol(mu) > 1) {
         mu.i <- mu[,document$doc.num]
