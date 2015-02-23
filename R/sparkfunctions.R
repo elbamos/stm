@@ -33,9 +33,11 @@ estep.spark.partition <- function(
   sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
   if (doDebug) print("broadcast sigma")
   
+  combined.rdd <- cogroup(documents.rdd, lambda.distributed, numPartitions = spark.partitions)
+  
   # perform logistic normal
   if (doDebug) print("mapping e-step")
-  part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split, part) {
+  part.rdd <- mapPartitionsWithIndex(combined.rdd, function(split, part) {
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
@@ -47,11 +49,13 @@ estep.spark.partition <- function(
     
     mu <- value(mu.distributed)
     beta.in <- value(beta.distributed)
-    lambda.in <- value(lambda.distributed)
+#    lambda.in <- value(lambda.distributed)
     siginv <- value(siginv.broadcast)
     sigmaentropy <- value(sigmaentropy.broadcast)
-    for (document in part) {
-      init <- lambda.in[document$doc.num,]
+    for (combined in part) {
+      if (doDebug) print(str(part))
+      document <- part[[1]]
+      init <- part[[2]]
       beta.i <- beta.in[[document$aspect]]
       if (ncol(mu) > 1) {
         mu.i <- mu[,document$doc.num]
@@ -113,19 +117,20 @@ distribute.beta <- function(beta, spark.context, spark.partitions) {
 #     parallelize(spark.context, beta, length(beta))
 }
 
-distribute.lambda <- function(lambda, spark.context) {
+distribute.lambda <- function(lambda, spark.context, spark.partitions) {
   index <- 0
-  if (doDebug) {
-    print("lambda")
-    print(object_size(lambda))
-  }
-  broadcast(sc = spark.context, lambda)
+  lambdalist <- alply(lambda, .margins=1, .fun = function(x) {
+    index <<- index + 1
+    #    list(key = betaindex[index], 
+    list(key = index, 
+         lambda = x)
+  })
   #       beta <- llply(beta, function(x) {
   #         index <<- index + 1
   #         list(key = index, 
   #              beta = x)
   #       })
-  #     parallelize(spark.context, beta, length(beta))
+  parallelize(spark.context, lambdalist, spark.partitions)
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions) {
