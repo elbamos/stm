@@ -113,6 +113,21 @@ distribute.beta <- function(beta, spark.context, spark.partitions) {
 #     parallelize(spark.context, beta, length(beta))
 }
 
+distribute.lambda <- function(lambda, spark.context) {
+  index <- 0
+  if (doDebug) {
+    print("lambda")
+    print(object_size(lambda))
+  }
+  broadcast(sc = spark.context, lambda)
+  #       beta <- llply(beta, function(x) {
+  #         index <<- index + 1
+  #         list(key = index, 
+  #              beta = x)
+  #       })
+  #     parallelize(spark.context, beta, length(beta))
+}
+
 distribute.mu <- function(mu, spark.context, spark.partitions) {
   if (doDebug) {
     print("mu")
@@ -174,15 +189,13 @@ covar.broadcast <- settings$covar.broadcast
 if (doDebug) print("distributing counts")
   counts.list <- llply(counts, function(x) {
     index <<- index + 1
-    list(key = index, 
-         list(
+    list(
            term = index, 
           counts.i = x, 
           m.i = ifelse(is.null(m), NULL, m[index])
          )
-    )
   })
-  counts.rdd <- parallelize(spark.context, counts.list, min(spark.partitions, length(counts.list)))
+  counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
   rm(counts.list)
 
   #########
@@ -206,22 +219,25 @@ if (doDebug) print("distributing counts")
 #  out <- vector(mode="list", length=transposed.length)
   #now iterate over the vocabulary
 if (doDebug) print("Big map")
-  mnreg.rdd <- mapValues(counts.rdd, function(x) {
-    i <- x$term
-    counts.i <- x$counts.i
-    m.i <- ifelse(is.null(x$m.i), 0, x$m.i)
-    offset <- m.i + value(offset.broadcast)
-
-    mod <- NULL
-    while(is.null(mod)) {
-      mod <- tryCatch(glmnet(x=value(covar.broadcast), y=counts.i, family="poisson", 
-                             offset=offset, standardize=FALSE,
-                             intercept=is.null(x$m.i), 
-                             lambda.min.ratio=lambda.min.ratio,
-                             nlambda=nlambda, alpha=alpha,
-                             maxit=maxit, thresh=thresh),
-                      warning=function(w) return(NULL),
-                      error=function(e) stop(e))
+  mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
+    offset.in <- value(offset.broadcast)
+    covar <- value(covar.broadcast)
+    out <- list()
+    for (count in part) {
+      if (doDebug) print(str(part))
+      i <- count$term
+      counts.i <- count$counts.i
+      m.i <- ifelse(is.null(count$m.i), 0, count$m.i) + offset.in
+      mod <- NULL
+      while(is.null(mod)) {
+        mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
+                               offset=offset, standardize=FALSE,
+                               intercept=is.null(m.i), 
+                               lambda.min.ratio=lambda.min.ratio,
+                               nlambda=nlambda, alpha=alpha,
+                               maxit=maxit, thresh=thresh),
+                        warning=function(w) return(NULL),
+                        error=function(e) stop(e))
       #if it didn't converge, increase nlambda paths by 20% 
       if(is.null(mod)) nlambda <- nlambda + floor(.2*nlambda)
     }
@@ -230,19 +246,18 @@ if (doDebug) print("Big map")
     lambda <- which.min(ic)
     coef <- subM(mod$beta,lambda) #return coefficients
     if(is.null(x$m.i)) coef <- c(mod$a0[lambda], coef)
-
-    coef
-  })
-mnreg.rdd <- sortByKey(mnreg.rdd)
+    out[[i]] <- c(i, coef)
+  } 
+  out <- do.call(cbind, out)
+  list (key = split, coef = out)
+  }
+  )
 if (doDebug)  print("going to reduce")
-coef <- reduce(mnreg.rdd, function(x,y) {
-  if ("list" %in% class(x)) x <- x[[2]]
-  if ("list" %in% class(y)) y <- y[[2]]
-  cbind(x, y)
-}) 
+coef <- reduce(mnreg.rdd, cbind) 
+coef <- coef[,order(coef[1,])]
+coef <- coef[-1,]
 
-
-#  print(str(coef))
+if (doDebug)  print(str(coef))
 if (doDebug) print("reduced")
 
 if (doDebug)  print("wrap up the function and redistribute beta")

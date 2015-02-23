@@ -67,7 +67,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu <- distribute.mu(mu, spark.context)
-  lambda.distributed <- broadcast(spark.context, lambda)
+  lambda.distributed <- distribute.lambda(lambda, spark.context)
   
   #The covariate matrix
   rows <- settings$dim$A * settings$dim$K
@@ -139,8 +139,8 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     if (doDebug) print("Lambda")
     lambda <- estep.output$lambda
     lambda <- do.call(rbind,lambda)
-    print("rbound")
-    print(str(lambda))
+    if (doDebug) print("rbound")
+    if (doDebug) print(str(lambda))
     lambda <- lambda[order(lambda[,1]),]
     lambda <- lambda[,-1]
     if(doDebug) print(str(lambda))
