@@ -1,98 +1,183 @@
 doDebug <- FALSE
 
 
-estep.spark.partition <- function( 
-  N,
+estep.lambda <- function( 
+  documents.rdd,
+  beta.distributed,
+  mu.distributed, 
+  siginv.broadcast,
+  spark.context,
+  spark.partitions,
+  verbose) {
+  
+  if (doDebug) print("Entering e-step")
+  
+  # perform logistic normal
+  if (doDebug) print("mapping e-step lambda")
+  mapPartitionsWithIndex(documents.rdd, function(split, part) {   
+    mu <- value(mu.distributed)
+    beta.in <- value(beta.distributed)
+    siginv <- value(siginv.broadcast)
+    out <- list()
+#    print(paste("Entering logist normal 1", length(part)))
+    for (listElement in part) {
+      if (doDebug) print(paste("logistic normal 1 start", class(listElement)))
+      if (doDebug && is.null(listElement[[1]])) {
+        print("logistic normal 1 list element is null")
+        print(str(listElement))
+        print(str(part))
+      }
+      if (doDebug && listElement[[1]] == 1) {
+        print("logistic normal 1")
+        print(str(listElement))
+      }
+      document <- listElement[[2]]
+      if (! is.numeric(document$aspect)) print(str(document))
+      init <- document$lambda
+      words <- document$document[1,]
+      beta.i.lambda <- beta.in[[document$aspect]][,words,drop=FALSE]
+      if (ncol(mu) > 1) {
+        mu.i <- mu[,document$doc.num]
+      } else {
+        mu.i <- as.numeric(mu)
+      }
+        
+        document$lambda <- logisticnormal.lambda(eta = init, 
+                                            mu = mu.i, 
+                                            siginv = siginv,
+                                            beta = beta.i.lambda, 
+                                            doc = document$document
+        )
+        out[[listElement[[1]]]] <- list(listElement[[1]], document)
+      }
+    out <- rmNullObs(out)
+#    print(paste("Leaving logistic normal 1", length(out)))
+    out
+  })
+}
+
+logisticnormal.lambda <- function(eta, mu, siginv, beta, doc) {
+  doc.ct <- doc[2,]
+  Ndoc <- sum(doc.ct)
+  #even at K=100, BFGS is faster than L-BFGS
+  optim.out <- optim(par=eta, fn=stm:::lhood, gr=stm:::grad,
+                     method="BFGS", control=list(maxit=500),
+                     doc.ct=doc.ct, mu=mu,
+                     siginv=siginv, beta=beta, Ndoc=Ndoc)
+  optim.out$par
+}
+
+is.NullOb <- function(x) is.null(x) | all(sapply(x, is.null))
+
+## Recursively step down into list, removing all such objects 
+rmNullObs <- function(x) {
+  x <- Filter(Negate(is.NullOb), x)
+  lapply(x, function(x) if (is.list(x)) rmNullObs(x) else x)
+}
+
+estep.hpb <- function( 
   V, 
   K,
   A,
   documents.rdd,
   beta.distributed,
-  lambda.distributed, 
   mu.distributed, 
-  sigma, 
+  siginv.broadcast = siginv.broadcast,
+  sigmaentropy.broadcast = sigmaentropy.broadcast,
   spark.context,
   spark.partitions,
   verbose) {
-  
-  print("Entering e-step")
-  
-  # 2) Precalculate common components
-  sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
-  siginv <- solve(sigma)
-  
-  #broadcast what we need
-  if (doDebug) {
-    print("sigma")
-    print(object_size(sigma))
-    print("siginv")
-    print(object_size(siginv))
-  }
-  siginv.broadcast <- broadcast(spark.context, siginv)
-  if (doDebug) print("broadcast siginv")
-  sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
-  if (doDebug) print("broadcast sigma")
-  
-  combined.rdd <- cogroup(documents.rdd, lambda.distributed, numPartitions = spark.partitions)
+
   
   # perform logistic normal
   if (doDebug) print("mapping e-step")
-  part.rdd <- mapPartitionsWithIndex(combined.rdd, function(split, part) {
+#  print(count(documents.rdd))
+  part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split, part) {
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
     }
     
     sigma.ss <- diag(0, nrow=(K-1))
-    bound <- list()
-    lambda <- list()
+    bound <- NULL
     
     mu <- value(mu.distributed)
     beta.in <- value(beta.distributed)
-#    lambda.in <- value(lambda.distributed)
+    #    lambda.in <- value(lambda.distributed)
     siginv <- value(siginv.broadcast)
     sigmaentropy <- value(sigmaentropy.broadcast)
-    for (combined in part) {
-      if (doDebug) print(str(combined))
-      document <- combined[[2]][[1]][[1]]
-      init <- combined[[2]][[2]][[1]]
-      beta.i <- beta.in[[document$aspect]]
+    if (doDebug) {
+      s <- sum(is.null(part)) 
+      print(paste("In hpb map, ", s, " elements of the list are null."))
+    }
+    for (listElement in part) {
+      if (is.null(listElement)) next
+      if (doDebug) print(class(listElement))
+      if (doDebug && listElement[[1]] == 1) print(str(listElement))
+      document <- listElement[[2]]
+      if (doDebug && document$doc.num == 1) print(str(document))
+      eta <- document$lambda
+      if (doDebug && is.null(document$aspect)) print(str(part))
+      words <- document$document[1,]
+      if (! is.numeric(document$aspect)) {
+        print("hpb")
+        print(str(listElement))
+      }
+      beta.i.hpb <- beta.in[[document$aspect]][,words,drop=FALSE]
       if (ncol(mu) > 1) {
         mu.i <- mu[,document$doc.num]
       } else {
         mu.i <- as.numeric(mu)
       }
       
-      words <- document$document[1,]
-      beta.i <- beta.i[,words,drop=FALSE]
+      doc.ct <- document$document[2,]
+      Ndoc <- sum(doc.ct)
+      #Solve for Hessian/Phi/Bound returning the result
+      doc.results <- stm:::hpb(eta, doc.ct=doc.ct, mu=mu.i,
+          siginv=siginv, beta=beta.i.hpb, Ndoc=Ndoc,
+          sigmaentropy=sigmaentropy)
       
-      doc.results <- stm:::logisticnormal(eta = init, 
-                                          mu = mu.i, 
-                                          siginv = siginv,
-                                          beta = beta.i, 
-                                          doc = document$document,
-                                          sigmaentropy  = sigmaentropy
-      )
-      if (doDebug) print("finished logistic normal")
+
       beta.ss[[document$aspect]][,words] <- doc.results$phis + beta.ss[[document$aspect]][,words]
-      if (doDebug)print("done beta")
-      lambda[[document$doc.num]] <- c(document$doc.num, doc.results$eta$lambda)
-      if (doDebug)print("done lambda")
       sigma.ss <- sigma.ss + doc.results$eta$nu
-      if (doDebug)print("done sigma")
-      bound[[document$doc.num]] <- c(document$doc.num, doc.results$bound)
+      if (is.null(bound)) {bound <- c(document$doc.num, doc.results$bound)}
+      else {bound <- rbind(bound, c(document$doc.num, doc.results$bound))}
+      if (doDebug) print("finished hpb")
     }
-    if (doDebug)print("making a list")
-    list(split,list(lambda = lambda, sigma.ss = sigma.ss, beta.ss = beta.ss, bound = bound))
+    if (doDebug)print("making hpb partition")
+    list(list(key = split,
+              list(sigma.ss = sigma.ss, 
+                   beta.ss = beta.ss, 
+                   bound = bound
+                   )
+              )
+         )
   })
-  reduce(part.rdd, function(x, y) {
-    if (length(x) == 4 && length(y) == 4) {
-    list(lambda = c(x$lambda, y$lambda), 
-         bound = c(x$bound, y$bound), 
-         sigma.ss = x$sigma.ss + y$sigma.ss, 
-         beta.ss = merge.beta(x$beta.ss, y$beta.ss))
+  inter.rdd <- reduceByKey(part.rdd, function(x, y) {
+    if (doDebug) {
+      print("reduction by key")
+      print(str(x))
+      print(str(y))
+    }
+    if (length(x) == 3 && length(y) == 3) {
+      list(bound = rbind(x$bound, y$bound), 
+           sigma.ss = x$sigma.ss + y$sigma.ss, 
+           beta.ss = merge.beta(x$beta.ss, y$beta.ss))
     } else { 
-    y
+      y
+    }
+  }, 5L)
+  reduce(inter.rdd, function(x, y) {
+    if (length(x[[2]]) == 3 && length(y[[2]]) == 3) {
+      x <- x[[2]]
+      y <- y[[2]]
+      list(bound = rbind(x$bound, y$bound), 
+           sigma.ss = x$sigma.ss + y$sigma.ss, 
+           beta.ss = merge.beta(x$beta.ss, y$beta.ss))
+    } else { 
+      print("bad reduction match")
+      print(str(x))
+      print(str(y))
     }
   })
 }
@@ -168,7 +253,9 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   ic.k <- settings$tau$ic.k
   thresh <- settings$tau$tol
   #Aggregate outcome data.
-counts <- do.call(rbind,beta.ss)
+  if (! "list" %in% class(beta.ss)) print(str(beta.ss))
+  if (doDebug) print(paste("mnreg beta ss", str(beta.ss)))
+  counts <- do.call(rbind,beta.ss)
 
 if (doDebug) print(str(counts))
 
@@ -250,15 +337,18 @@ if (doDebug) print("Big map")
     ic <- dev + ic.k*mod$df
     lambda <- which.min(ic)
     coef <- subM(mod$beta,lambda) #return coefficients
-    if(is.null(x$m.i)) coef <- c(mod$a0[lambda], coef)
-    out[[i]] <- c(i, coef)
+    if(is.null(m.i)) coef <- c(mod$a0[lambda], coef)
+    out[[i]] <- list(key = i, c(i, coef))
   } 
-  out <- do.call(cbind, out)
-  list (key = split, coef = out)
+  out <- rmNullObs(out)
+  out
   }
   )
 if (doDebug)  print("going to reduce")
-coef <- reduce(mnreg.rdd, cbind) 
+coef <- reduce(mnreg.rdd, function(x,y) {
+  if ("list" %in% class(x)) x <- x[[2]]
+  if ("list" %in% class(y)) y <- y[[2]]
+  cbind(x, y)}) 
 coef <- coef[,order(coef[1,])]
 coef <- coef[-1,]
 
@@ -277,7 +367,9 @@ if (doDebug)  print("wrap up the function and redistribute beta")
   #predictions 
   ##
   #linear predictor
- linpred <- as.matrix(settings$covar%*%coef) 
+covar <- settings$covar
+ linpred <- as.matrix(covar%*%coef) 
+#print(str(linpred))
  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
 #softmax
  explinpred <- exp(linpred)

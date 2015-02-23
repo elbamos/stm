@@ -58,16 +58,16 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
          list(key = doc.keys[index], 
               doc.num = index,
               document = x,
-              aspect = betaindex[index])
-    )
+              aspect = betaindex[index], 
+              lambda = lambda[index,]))
   })
   documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
   if (doDebug) print("Distributed documents")
-  cache(documents.rdd)
+
   
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu <- distribute.mu(mu, spark.context)
-  lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
+#  lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
   
   #The covariate matrix
   rows <- settings$dim$A * settings$dim$K
@@ -98,16 +98,44 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   while(!stopits) {
     t1 <- proc.time()
     if (verbose) cat("Distributing E-Step\t")
-    estep.output <- estep.spark.partition( 
+    
+    sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
+    siginv <- solve(sigma)
+    
+    #broadcast what we need
+    if (doDebug) {
+      print("sigma")
+      print(object_size(sigma))
+      print("siginv")
+      print(object_size(siginv))
+    }
+    siginv.broadcast <- broadcast(spark.context, siginv)
+    if (doDebug) print("broadcast siginv")
+    sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
+    if (doDebug) print("broadcast sigma")
+    
+    old.documents.rdd <- documents.rdd
+    documents.rdd <- estep.lambda( 
       documents.rdd = documents.rdd,
-      N = length(documents),
+      beta.distributed = beta.distributed,
+#      lambda.distributed = lambda.distributed,
+      mu = mu, 
+      siginv.broadcast = siginv.broadcast,
+      spark.context = spark.context,
+      spark.partitions = spark.partitions,
+      verbose) 
+    cache(documents.rdd)
+
+    estep.output <- estep.hpb(
+      documents.rdd = documents.rdd,
       A = settings$dim$A,
       K = settings$dim$K,
       V = length(vocab),
       beta.distributed = beta.distributed,
-      lambda.distributed = lambda.distributed,
+      #      lambda.distributed = lambda.distributed,
       mu = mu, 
-      sigma = sigma, 
+      siginv.broadcast = siginv.broadcast,
+      sigmaentropy.broadcast = sigmaentropy.broadcast,
       spark.context = spark.context,
       spark.partitions = spark.partitions,
       verbose) 
@@ -115,10 +143,11 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
       t1 <- proc.time()
     }
+    unpersist(old.documents.rdd)
     if (doDebug) print(str(estep.output))
     
     if (doDebug) print("Mapping beta.")
-    
+#    doDebug <- TRUE
     if (is.null(beta$kappa)) {
       beta.ss <- estep.output$beta.ss / rowSums(estep.output$beta.ss)
       beta.distributed <- broadcast(spark.context, beta.ss)
@@ -137,14 +166,14 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       }
     }
     if (doDebug) print("Lambda")
-    lambda <- estep.output$lambda
-    lambda <- do.call(rbind,lambda)
+    lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
+    lambda <- reduce(lambda.rdd, rbind)
     if (doDebug) print("rbound")
     if (doDebug) print(str(lambda))
     lambda <- lambda[order(lambda[,1]),]
     lambda <- lambda[,-1]
     if(doDebug) print(str(lambda))
-    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
+#    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
     
     if (doDebug) print("Opt mu")
     mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
@@ -158,7 +187,6 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
                              mu=mu.local$mu, sigprior=settings$sigma$prior)
     
     bound.ss <-  estep.output$bound
-    bound.ss <- do.call(rbind, bound.ss)
     bound.ss <- bound.ss[order(bound.ss[,1]),]
     bound.ss <- bound.ss[,-1]
     if (verbose) cat(sprintf("Completed M-Step (%d seconds). \n", floor(proc.time()-t1)[3]))
