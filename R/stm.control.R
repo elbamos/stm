@@ -124,7 +124,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       spark.context = spark.context,
       spark.partitions = spark.partitions,
       verbose) 
-    cache(documents.rdd)
+    persist(documents.rdd, "MEMORY_AND_DISK")
 
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
