@@ -164,10 +164,17 @@ estep.hpb <- function(
            sigma.ss = x$sigma.ss + y$sigma.ss, 
            beta.ss = merge.beta(x$beta.ss, y$beta.ss))
     } else { 
-      y
+      print("reduction by key")
+      print(str(x))
+      print(str(y))
     }
   }, 5L)
   reduce(inter.rdd, function(x, y) {
+    if (is.null(x) && is.null(y)) {
+      print ("both null")
+    } else {
+      print("not both null")
+    }
     if (length(x[[2]]) == 3 && length(y[[2]]) == 3) {
       x <- x[[2]]
       y <- y[[2]]
