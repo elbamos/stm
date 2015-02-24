@@ -139,11 +139,13 @@ estep.hpb <- function(
     })
     print("making hpb partition")
     #list(key = split %% 9,
-              list(s = sigma.ss, 
+     ret <-         list(s = sigma.ss, 
                    b = beta.ss, 
                    bd = bound
                    )
      #         )
+     print(str(ret))
+     ret
          
   })
 #   inter.rdd <- combineByKey(part.rdd, function(v) {
