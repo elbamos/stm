@@ -170,7 +170,7 @@ estep.hpb <- function(
     list(bound = rbind(C1$bound, C2$bound), 
          sigma.ss = C1$sigma.ss + C2$sigma.ss, 
          beta.ss = merge.beta(C1$beta.ss, C2$beta.ss))
-  }, round(spark.partitions/10))
+  }, as.integer(round(spark.partitions/10)))
   reduce(inter.rdd, function(x, y) {
     if (is.null(x) && is.null(y)) {
       print ("both null")
