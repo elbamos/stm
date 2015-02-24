@@ -19,7 +19,7 @@ estep.lambda <- function(
     beta.in <- value(beta.distributed)
     siginv <- value(siginv.broadcast)
 #    print(paste("Entering logist normal 1", length(part)))
-    llply(.data = part, .fun = function(listElement) {
+    out <- llply(.data = part, .fun = function(listElement) {
       if (doDebug) print(paste("logistic normal 1 start", class(listElement)))
       if (doDebug && is.null(listElement[[1]])) {
         print("logistic normal 1 list element is null")
@@ -50,6 +50,8 @@ estep.lambda <- function(
         list(listElement[[1]], document)
       }
     )
+    print(paste("logistic partition output", object_size(out)))
+    out
   })
 }
 
