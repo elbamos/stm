@@ -62,6 +62,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
               aspect = as.integer(betaindex[index]), 
               lambda = lambda[index,]))
   })
+  print(paste("doclist size"), object_size(doclist))
   documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
   print("Distributed documents")
 
