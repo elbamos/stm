@@ -55,14 +55,14 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   index <- 0
   doclist <- llply(documents, .fun = function(x) {
     index <<- index + 1
-    list(key = index, 
+#    list(key = index, 
          list(#key = doc.keys[index], 
-              doc.num = index,
-              document = x,
-              aspect = as.integer(betaindex[index]), 
-              lambda = lambda[index,]))
+              dn = index,
+              d = x,
+              a = as.integer(betaindex[index]), 
+              l = lambda[index,])#)
   })
-  print(paste("doclist size"), object_size(doclist))
+  print(paste("doclist size", object_size(doclist)))
   documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
   print("Distributed documents")
 
@@ -130,7 +130,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     print("initial map")
 
     if (doDebug) print("Lambda")
-    lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
+    lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$dn, x[[2]]$l)})
     lambda <- reduce(lambda.rdd, rbind)
     print("lambda")
     if (doDebug) print(str(lambda))

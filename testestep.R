@@ -1,6 +1,7 @@
 library(stm)
 library(lda)
 library(plyr)
+library(pryr)
 library(Matrix)
 library(matrixStats)
 source("./R/sparkfunctions.R")
@@ -13,12 +14,12 @@ source("./R/STMreport.R")
 
 library(SparkR)
 
-spark.env <- list(spark.executor.memory="25g", 
+spark.env <- list(spark.executor.memory="2500m", 
                   spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-                  spark.driver.memory="25g", 
-                  spark.driver.maxResultSize = "25g"
+                  spark.driver.memory="2500m", 
+                  spark.driver.maxResultSize = "2500m"
 #                 ,spark.rdd.compress="true"
 )
 

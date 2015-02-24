@@ -30,13 +30,13 @@ estep.lambda <- function(
         print("logistic normal 1")
         print(str(listElement))
       }
-      document <- listElement[[2]]
-      if (! is.numeric(document$aspect)) print(str(document))
-      init <- document$lambda
-      words <- document$document[1,]
-      beta.i.lambda <- beta.in[[document$aspect]][,words,drop=FALSE]
+      document <- listElement
+      if (! is.numeric(document$a)) print(str(document))
+      init <- document$l
+      words <- document$d[1,]
+      beta.i.lambda <- beta.in[[document$a]][,words,drop=FALSE]
       if (ncol(mu) > 1) {
-        mu.i <- mu[,document$doc.num]
+        mu.i <- mu[,document$dn]
       } else {
         mu.i <- as.numeric(mu)
       }
@@ -45,9 +45,9 @@ estep.lambda <- function(
                                             mu = mu.i, 
                                             siginv = siginv,
                                             beta = beta.i.lambda, 
-                                            doc = document$document
+                                            doc = document$d
         )
-        list(listElement[[1]], document)
+        document
       }
     )
     print(paste("logistic partition output", object_size(out)))
@@ -111,37 +111,37 @@ estep.hpb <- function(
     bound <- laply(part, .fun = function(listElement) {
       if (is.null(listElement)) next
       if (doDebug && listElement[[1]] == 1) print(str(listElement))
-      document <- listElement[[2]]
+      document <- listElement
       if (doDebug && document$doc.num == 1) print(str(document))
-      eta <- document$lambda
-      words <- document$document[1,]
-      if (! is.numeric(document$aspect)) {
+      eta <- document$l
+      words <- document$d[1,]
+      if (! is.numeric(document$a)) {
         print("hpb")
         print(str(listElement))
       }
       if (ncol(mu) > 1) {
-        mu.i <- mu[,document$doc.num]
+        mu.i <- mu[,document$dn]
       } else {
         mu.i <- as.numeric(mu)
       }
       
-      doc.ct <- document$document[2,]
+      doc.ct <- document$d[2,]
       Ndoc <- sum(doc.ct)
       #Solve for Hessian/Phi/Bound returning the result
       doc.results <- stm:::hpb(eta, doc.ct=doc.ct, mu=mu.i,
-          siginv=siginv, beta=beta.in[[document$aspect]][,words,drop=FALSE], Ndoc=Ndoc,
+          siginv=siginv, beta=beta.in[[document$a]][,words,drop=FALSE], Ndoc=Ndoc,
           sigmaentropy=sigmaentropy)
       
 
       beta.ss[[document$aspect]][,words] <<- doc.results$phis + beta.ss[[document$aspect]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
-      c(document$doc.num, doc.results$bound)
+      c(document$dn, doc.results$bound)
     })
     print("making hpb partition")
     list(key = split %% 9,
-              list(sigma.ss = sigma.ss, 
-                   beta.ss = beta.ss, 
-                   bound = bound
+              list(s = sigma.ss, 
+                   b = beta.ss, 
+                   bd = bound
                    )
               )
          
@@ -165,7 +165,7 @@ estep.hpb <- function(
 #          beta.ss = merge.beta(C1$beta.ss, C2$beta.ss))
 #   }, as.integer(round(spark.partitions/4)))
 
-  ret <- reduceByKey(part.rdd, function(x, y) {
+  ret <- reduce(part.rdd, function(x, y) {
     if (is.null(x) && is.null(y)) {
       print ("both null")
     } else {
@@ -176,19 +176,16 @@ estep.hpb <- function(
     if (is.null(x) && !is.null(y)) return(y)
     if (is.null(y) && !is.null(x)) return(x)
     if (length(x) == 3 && length(y) == 3) {
-      list(bound = rbind(x$bound, y$bound), 
-           sigma.ss = x$sigma.ss + y$sigma.ss, 
-           beta.ss = merge.beta(x$beta.ss, y$beta.ss))
+      list(bd = rbind(x$bd, y$bd), 
+           s = x$s + y$s, 
+           b = merge.beta(x$b, y$b))
     } else { 
       print("bad reduction match")
       print(str(x))
       print(str(y))
     }
-  }, numPartitions = 9)
-cache(ret)
-print("counting")
-l <- count(ret)
-print("counted")
+  })
+print("reduced")
 ret
 }
 
