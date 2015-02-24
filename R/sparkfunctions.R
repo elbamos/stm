@@ -145,7 +145,7 @@ estep.hpb <- function(
       if (doDebug) print("finished hpb")
     }
     if (doDebug)print("making hpb partition")
-    list(list(key = split %% 5,
+    list(list(key = split,
               list(sigma.ss = sigma.ss, 
                    beta.ss = beta.ss, 
                    bound = bound
@@ -153,25 +153,25 @@ estep.hpb <- function(
               )
          )
   })
-  inter.rdd <- combineByKey(part.rdd, function(v) {
-    print("create combiner")
-    v
-  }, function(C, v) {
-    print("merge values")
-    print(str(C))
-    print(str(v))
-    list(bound = rbind(C$bound, v$bound), 
-         sigma.ss = C$sigma.ss + v$sigma.ss, 
-         beta.ss = merge.beta(C$beta.ss, v$beta.ss))
-  }, function(C1, C2) {
-    print("merge combiners")
-    print(str(C1))
-    print(str(C2))
-    list(bound = rbind(C1$bound, C2$bound), 
-         sigma.ss = C1$sigma.ss + C2$sigma.ss, 
-         beta.ss = merge.beta(C1$beta.ss, C2$beta.ss))
-  }, as.integer(round(spark.partitions/10)))
-  reduce(inter.rdd, function(x, y) {
+#   inter.rdd <- combineByKey(part.rdd, function(v) {
+#     print("create combiner")
+#     v
+#   }, function(C, v) {
+#     print("merge values")
+#     print(str(C))
+#     print(str(v))
+#     list(bound = rbind(C$bound, v$bound), 
+#          sigma.ss = C$sigma.ss + v$sigma.ss, 
+#          beta.ss = merge.beta(C$beta.ss, v$beta.ss))
+#   }, function(C1, C2) {
+#     print("merge combiners")
+#     print(str(C1))
+#     print(str(C2))
+#     list(bound = rbind(C1$bound, C2$bound), 
+#          sigma.ss = C1$sigma.ss + C2$sigma.ss, 
+#          beta.ss = merge.beta(C1$beta.ss, C2$beta.ss))
+#   }, as.integer(round(spark.partitions/10)))
+  reduce(part.rdd, function(x, y) {
     if (is.null(x) && is.null(y)) {
       print ("both null")
     } else {
