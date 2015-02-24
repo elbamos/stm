@@ -62,7 +62,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
               lambda = lambda[index,]))
   })
   documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
-  if (doDebug) print("Distributed documents")
+  print("Distributed documents")
 
   
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
@@ -97,7 +97,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   ############
   while(!stopits) {
     t1 <- proc.time()
-    if (verbose) cat("Distributing E-Step\t")
+    cat("Distributing E-Step\t")
     
     sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
     siginv <- solve(sigma)
@@ -125,7 +125,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       spark.partitions = spark.partitions,
       verbose) 
     persist(documents.rdd, "MEMORY_AND_DISK")
-
+    print("initial map")
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
       A = settings$dim$A,
