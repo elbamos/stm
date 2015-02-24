@@ -144,14 +144,14 @@ estep.hpb <- function(
       else {bound <- rbind(bound, c(document$doc.num, doc.results$bound))}
       if (doDebug) print("finished hpb")
     }
-    if (doDebug)print("making hpb partition")
-    list(list(key = split,
+    print("making hpb partition")
+    list(key = split,
               list(sigma.ss = sigma.ss, 
                    beta.ss = beta.ss, 
                    bound = bound
                    )
               )
-         )
+         
   })
 #   inter.rdd <- combineByKey(part.rdd, function(v) {
 #     print("create combiner")
