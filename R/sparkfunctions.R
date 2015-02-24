@@ -133,17 +133,17 @@ estep.hpb <- function(
           sigmaentropy=sigmaentropy)
       
 
-      beta.ss[[document$aspect]][,words] <<- doc.results$phis + beta.ss[[document$aspect]][,words]
+      beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
       c(document$dn, doc.results$bound)
     })
     print("making hpb partition")
-    list(key = split %% 9,
+    #list(key = split %% 9,
               list(s = sigma.ss, 
                    b = beta.ss, 
                    bd = bound
                    )
-              )
+     #         )
          
   })
 #   inter.rdd <- combineByKey(part.rdd, function(v) {
