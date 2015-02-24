@@ -47,7 +47,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   if (doDebug) print("Distributing globals")
   includePackage(spark.context, "glmnet")
   includePackage(spark.context, "plyr")
-  includePackage(spark.context, "Matrix")
+#  includePackage(spark.context, "Matrix")
   # if we change documents to have a key as the first element, then we can use an RDD
   if (is.null(names(documents))) names(documents) <- 1:length(documents)
   doc.keys <- names(documents)
@@ -55,10 +55,10 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   doclist <- llply(documents, .fun = function(x) {
     index <<- index + 1
     list(key = index, 
-         list(key = doc.keys[index], 
+         list(#key = doc.keys[index], 
               doc.num = index,
               document = x,
-              aspect = betaindex[index], 
+              aspect = as.integer(betaindex[index]), 
               lambda = lambda[index,]))
   })
   documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
@@ -126,15 +126,17 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       verbose) 
     persist(documents.rdd, "MEMORY_AND_DISK")
     print("initial map")
-if (doDebug) print("Lambda")
-lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
-lambda <- reduce(lambda.rdd, rbind)
-print("lambda")
-if (doDebug) print(str(lambda))
-lambda <- lambda[order(lambda[,1]),]
-lambda <- lambda[,-1]
-if(doDebug) print(str(lambda))
-unpersist(old.documents.rdd)
+
+    if (doDebug) print("Lambda")
+    lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
+    lambda <- reduce(lambda.rdd, rbind)
+    print("lambda")
+    if (doDebug) print(str(lambda))
+    lambda <- lambda[order(lambda[,1]),]
+    lambda <- lambda[,-1]
+    if(doDebug) print(str(lambda))
+    unpersist(old.documents.rdd)
+
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
       A = settings$dim$A,

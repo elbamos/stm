@@ -18,9 +18,8 @@ estep.lambda <- function(
     mu <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv <- value(siginv.broadcast)
-    out <- list()
 #    print(paste("Entering logist normal 1", length(part)))
-    for (listElement in part) {
+    llply(.data = part, .fun = function(listElement) {
       if (doDebug) print(paste("logistic normal 1 start", class(listElement)))
       if (doDebug && is.null(listElement[[1]])) {
         print("logistic normal 1 list element is null")
@@ -48,11 +47,9 @@ estep.lambda <- function(
                                             beta = beta.i.lambda, 
                                             doc = document$document
         )
-        out[[listElement[[1]]]] <- list(listElement[[1]], document)
+        list(listElement[[1]], document)
       }
-    out <- rmNullObs(out)
-#    print(paste("Leaving logistic normal 1", length(out)))
-    out
+    )
   })
 }
 
@@ -82,8 +79,8 @@ estep.hpb <- function(
   documents.rdd,
   beta.distributed,
   mu.distributed, 
-  siginv.broadcast = siginv.broadcast,
-  sigmaentropy.broadcast = sigmaentropy.broadcast,
+  siginv.broadcast,
+  sigmaentropy.broadcast,
   spark.context,
   spark.partitions,
   verbose) {
@@ -99,7 +96,6 @@ estep.hpb <- function(
     }
     
     sigma.ss <- diag(0, nrow=(K-1))
-    bound <- NULL
     
     mu <- value(mu.distributed)
     beta.in <- value(beta.distributed)
@@ -110,20 +106,17 @@ estep.hpb <- function(
       s <- sum(is.null(part)) 
       print(paste("In hpb map, ", s, " elements of the list are null."))
     }
-    for (listElement in part) {
+    bound <- laply(part, .fun = function(listElement) {
       if (is.null(listElement)) next
-      if (doDebug) print(class(listElement))
       if (doDebug && listElement[[1]] == 1) print(str(listElement))
       document <- listElement[[2]]
       if (doDebug && document$doc.num == 1) print(str(document))
       eta <- document$lambda
-      if (doDebug && is.null(document$aspect)) print(str(part))
       words <- document$document[1,]
       if (! is.numeric(document$aspect)) {
         print("hpb")
         print(str(listElement))
       }
-      beta.i.hpb <- beta.in[[document$aspect]][,words,drop=FALSE]
       if (ncol(mu) > 1) {
         mu.i <- mu[,document$doc.num]
       } else {
@@ -134,18 +127,16 @@ estep.hpb <- function(
       Ndoc <- sum(doc.ct)
       #Solve for Hessian/Phi/Bound returning the result
       doc.results <- stm:::hpb(eta, doc.ct=doc.ct, mu=mu.i,
-          siginv=siginv, beta=beta.i.hpb, Ndoc=Ndoc,
+          siginv=siginv, beta=beta.in[[document$aspect]][,words,drop=FALSE], Ndoc=Ndoc,
           sigmaentropy=sigmaentropy)
       
 
-      beta.ss[[document$aspect]][,words] <- doc.results$phis + beta.ss[[document$aspect]][,words]
-      sigma.ss <- sigma.ss + doc.results$eta$nu
-      if (is.null(bound)) {bound <- c(document$doc.num, doc.results$bound)}
-      else {bound <- rbind(bound, c(document$doc.num, doc.results$bound))}
-      if (doDebug) print("finished hpb")
-    }
+      beta.ss[[document$aspect]][,words] <<- doc.results$phis + beta.ss[[document$aspect]][,words]
+      sigma.ss <<- sigma.ss + doc.results$eta$nu
+      c(document$doc.num, doc.results$bound)
+    })
     print("making hpb partition")
-    list(key = split %% 15,
+    list(key = split %% 9,
               list(sigma.ss = sigma.ss, 
                    beta.ss = beta.ss, 
                    bound = bound
@@ -191,7 +182,7 @@ estep.hpb <- function(
       print(str(x))
       print(str(y))
     }
-  }, numPartitions = 15)
+  }, numPartitions = 9)
 cache(ret)
 print("counting")
 l <- count(ret)
@@ -333,22 +324,21 @@ if (doDebug) print("Big map")
   mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
     offset.in <- value(offset.broadcast)
     covar <- value(covar.broadcast)
-    out <- list()
-    for (count in part) {
+    out <- laply(part, .fun = function(a.count) {
       if (doDebug) print(str(part))
-      i <- count$term
-      counts.i <- count$counts.i
-      if (is.null(count$m.i)) {
+      i <- a.count$term
+      counts.i <- a.count$counts.i
+      if (is.null(a.count$m.i)) {
         offset2 <- offset.in
       } else {
-        offset2 <- count$m.i + offset.in
+        offset2 <- a.count$m.i + offset.in
       }
 #      m.i <- ifelse(is.null(count$m.i), 0, count$m.i) + offset.in
       mod <- NULL
       while(is.null(mod)) {
         mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
                                offset=offset2, standardize=FALSE,
-                               intercept=is.null(count$m.i), 
+                               intercept=is.null(a.count$m.i), 
                                lambda.min.ratio=lambda.min.ratio,
                                nlambda=nlambda, alpha=alpha,
                                maxit=maxit, thresh=thresh),
@@ -361,11 +351,10 @@ if (doDebug) print("Big map")
     ic <- dev + ic.k*mod$df
     lambda <- which.min(ic)
     coef <- subM(mod$beta,lambda) #return coefficients
-    if(is.null(count$m.i)) coef <- c(mod$a0[lambda], coef)
-    out[[i]] <- c(i, coef)
-  } 
-  rmNullObs(out)
-  out <- cbind(out)
+    if(is.null(a.count$m.i)) coef <- c(mod$a0[lambda], coef)
+    c(i, coef)
+  } )
+  out <- t(out)
   list(key = split, value = out)
   }
   )

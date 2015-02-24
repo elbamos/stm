@@ -13,12 +13,12 @@ source("./R/STMreport.R")
 
 library(SparkR)
 
-spark.env <- list(spark.executor.memory="6g", 
-#                  spark.storage.memoryFraction = "0.2",
+spark.env <- list(spark.executor.memory="25g", 
+                  spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-                  spark.driver.memory="6g", 
-                  spark.driver.maxResultSize = "6g"
+                  spark.driver.memory="25g", 
+                  spark.driver.maxResultSize = "25g"
 #                 ,spark.rdd.compress="true"
 )
 
@@ -31,20 +31,20 @@ doDebug <- FALSE
 #spark.context = sparkR.init("local")
 
 
-# data(gadarian)
-# gadarian <- gadarian[1:25,]
-# 
+#  data(gadarian)
+# # gadarian <- gadarian[1:25,]
+# # 
 # corpus <- textProcessor(gadarian$open.ended.response)
 # prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
 # results <- stm(documents = prep$documents,
 #                vocab = prep$vocab,
 #                data = prep$meta, 
-#                max.em.its = 2, 
+#                max.em.its = 20, 
 #                 content = ~treatment,
 #                 prevalence = ~ pid_rep + MetaID,
 #                init.type="Spectral",
-#                K = 10, spark.context = spark.context, 
-#                spark.partitions = 2
+#                K = 50, spark.context = spark.context, 
+#                spark.partitions = 150
 # )
 data(poliblog5k)
 documents <- poliblog5k.docs
@@ -57,7 +57,8 @@ poliresults <- stm(documents = documents,
                     content = ~rating,
                     prevalence = ~ s(day) + blog,
                    K = 50, spark.context = spark.context, 
-                   spark.partitions = 15
+                   init = "Spectral",
+                   spark.partitions = 36
 )
 save(poliresuls, file="poliresults")
 
