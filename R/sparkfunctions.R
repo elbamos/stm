@@ -145,7 +145,7 @@ estep.hpb <- function(
       if (doDebug) print("finished hpb")
     }
     print("making hpb partition")
-    list(key = split,
+    list(key = split %% 15,
               list(sigma.ss = sigma.ss, 
                    beta.ss = beta.ss, 
                    bound = bound
@@ -191,7 +191,7 @@ estep.hpb <- function(
       print(str(x))
       print(str(y))
     }
-  })
+  }, numPartitions = 15)
 cache(ret)
 print("counting")
 l <- count(ret)
