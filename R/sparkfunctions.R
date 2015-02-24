@@ -277,6 +277,7 @@ covar.broadcast <- settings$covar.broadcast
 
   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
 
+
   index <- 0
 if (doDebug) print("distributing counts")
   counts.list <- llply(counts, function(x) {
@@ -287,6 +288,7 @@ if (doDebug) print("distributing counts")
           m.i = ifelse(is.null(m), NULL, m[index])
          )
   })
+
   counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
   rm(counts.list)
 
@@ -319,12 +321,17 @@ if (doDebug) print("Big map")
       if (doDebug) print(str(part))
       i <- count$term
       counts.i <- count$counts.i
-      m.i <- ifelse(is.null(count$m.i), 0, count$m.i) + offset.in
+      if (is.null(count$m.i)) {
+        offset2 <- offset.in
+      } else {
+        offset2 <- count$m.i + offset.in
+      }
+#      m.i <- ifelse(is.null(count$m.i), 0, count$m.i) + offset.in
       mod <- NULL
       while(is.null(mod)) {
         mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
-                               offset=offset, standardize=FALSE,
-                               intercept=is.null(m.i), 
+                               offset=offset2, standardize=FALSE,
+                               intercept=is.null(count$m.i), 
                                lambda.min.ratio=lambda.min.ratio,
                                nlambda=nlambda, alpha=alpha,
                                maxit=maxit, thresh=thresh),
@@ -337,11 +344,10 @@ if (doDebug) print("Big map")
     ic <- dev + ic.k*mod$df
     lambda <- which.min(ic)
     coef <- subM(mod$beta,lambda) #return coefficients
-    if(is.null(m.i)) coef <- c(mod$a0[lambda], coef)
+    if(is.null(count$m.i)) coef <- c(mod$a0[lambda], coef)
     out[[i]] <- list(key = i, c(i, coef))
   } 
-  out <- rmNullObs(out)
-  out
+  rmNullObs(out)
   }
   )
 if (doDebug)  print("going to reduce")
@@ -352,7 +358,6 @@ coef <- reduce(mnreg.rdd, function(x,y) {
 coef <- coef[,order(coef[1,])]
 coef <- coef[-1,]
 
-if (doDebug)  print(str(coef))
 if (doDebug) print("reduced")
 
 if (doDebug)  print("wrap up the function and redistribute beta")
@@ -368,13 +373,15 @@ if (doDebug)  print("wrap up the function and redistribute beta")
   ##
   #linear predictor
 covar <- settings$covar
+
  linpred <- as.matrix(covar%*%coef) 
-#print(str(linpred))
+
  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
 #softmax
  explinpred <- exp(linpred)
 
   beta <- explinpred/rowSums(explinpred)
+
   beta <- split(beta, rep(1:A, each=K))
 
   #wrangle into the list structure

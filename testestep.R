@@ -14,36 +14,37 @@ source("./R/STMreport.R")
 library(SparkR)
 
 spark.env <- list(spark.executor.memory="6g", 
-                  spark.storage.memoryFraction = "0.2",
+#                  spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
                   spark.driver.memory="6g", 
                   spark.driver.maxResultSize = "6g"
-                 ,spark.rdd.compress="true"
+#                 ,spark.rdd.compress="true"
 )
 
-#master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
+master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 
-# spark.context <- sparkR.init(master=master,
-#                              appName = paste0("poli", Sys.time()),
-#                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
-#doDebug <- TRUE
-spark.context = sparkR.init("local")
+spark.context <- sparkR.init(master=master,
+                             appName = paste0("poli", Sys.time()),
+                             sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
+doDebug <- FALSE
+#spark.context = sparkR.init("local")
 
 
-data(gadarian)
-#gadarian <- gadarian[1:25,]
-
+# data(gadarian)
+# gadarian <- gadarian[1:25,]
+# 
 # corpus <- textProcessor(gadarian$open.ended.response)
 # prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
 # results <- stm(documents = prep$documents,
 #                vocab = prep$vocab,
 #                data = prep$meta, 
-#                max.em.its = 20, 
+#                max.em.its = 2, 
 #                 content = ~treatment,
 #                 prevalence = ~ pid_rep + MetaID,
-#                K = 4, spark.context = spark.context, 
-#                spark.partitions = 120
+#                init.type="Spectral",
+#                K = 10, spark.context = spark.context, 
+#                spark.partitions = 2
 # )
 data(poliblog5k)
 documents <- poliblog5k.docs
@@ -55,11 +56,43 @@ poliresults <- stm(documents = documents,
                    max.em.its = 200, 
                     content = ~rating,
                     prevalence = ~ s(day) + blog,
-                   K = 10, spark.context = spark.context, 
-                   spark.partitions = 600
+                   K = 50, spark.context = spark.context, 
+                   spark.partitions = 15
 )
 save(poliresuls, file="poliresults")
 
-
-
-#sparkR.stop()
+# load("term_document_matrix")
+# load("x_nospam")
+# library(dplyr)
+# library(tm)
+# library(slam)
+# dtm <- as.DocumentTermMatrix(term_document_matrix)
+# out <- readCorpus(dtm, type = "slam")
+# names <- count(x, screenName)
+# thresh <- 60
+# names <- names[names$n > thresh,]$screenName
+# x %<>% mutate(tag = factor(ifelse(is.na(tag), "unknown", as.character(tag))),
+#               screenName = factor(ifelse(screenName %in% names, screenName, "inactive")),
+#               created_numeric = as.numeric(created)
+# ) %>% select(id, tag, screenName, created_numeric)
+# out2 <- prepDocuments(out$documents,
+#                       out$vocab,
+#                       meta =  x[x$id %in% names(out$documents),],
+#                       lower.thresh = 4,
+#                       upper.thresh = length(out$documents) / 2, verbose = TRUE)
+# rm(term_document_matrix)
+# rm(x)
+# rm(out)
+# bigtest <- stm(documents = out2$documents,
+#                    vocab = out2$vocab,
+#                    data = out2$meta, 
+#                    max.em.its = 200, 
+#                    content = ~tag,
+#                    prevalence = ~ s(created_numeric) + screenName,
+# #                   control = list(cpp = TRUE), 
+#                    init.type = "Spectral",
+#                    K = 200, spark.context = spark.context, 
+#                    spark.partitions = 15
+# )
+# 
+# #sparkR.stop()

@@ -139,6 +139,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       spark.context = spark.context,
       spark.partitions = spark.partitions,
       verbose) 
+
     if(verbose) {
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
       t1 <- proc.time()
