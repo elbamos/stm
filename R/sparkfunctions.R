@@ -177,9 +177,11 @@ estep.hpb <- function(
     } else {
       print("not both null")
     }
-    if (length(x[[2]]) == 3 && length(y[[2]]) == 3) {
-      x <- x[[2]]
-      y <- y[[2]]
+    if (length(x) == 2) x <- x[[2]]
+    if (length(y) == 2) y <- y[[2]]
+    if (is.null(x) && !is.null(y)) return(y)
+    if (is.null(y) && !is.null(x)) return(x)
+    if (length(x) == 3 && length(y) == 3) {
       list(bound = rbind(x$bound, y$bound), 
            sigma.ss = x$sigma.ss + y$sigma.ss, 
            beta.ss = merge.beta(x$beta.ss, y$beta.ss))
