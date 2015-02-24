@@ -130,7 +130,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     print("initial map")
 
     if (doDebug) print("Lambda")
-    lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$dn, x[[2]]$l)})
+    lambda.rdd <- map(documents.rdd, function(x) {c(x$dn, x$l)})
     lambda <- reduce(lambda.rdd, rbind)
     print("lambda")
     if (doDebug) print(str(lambda))
