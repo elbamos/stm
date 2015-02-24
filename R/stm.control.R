@@ -126,6 +126,15 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       verbose) 
     persist(documents.rdd, "MEMORY_AND_DISK")
     print("initial map")
+if (doDebug) print("Lambda")
+lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
+lambda <- reduce(lambda.rdd, rbind)
+print("lambda")
+if (doDebug) print(str(lambda))
+lambda <- lambda[order(lambda[,1]),]
+lambda <- lambda[,-1]
+if(doDebug) print(str(lambda))
+unpersist(old.documents.rdd)
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
       A = settings$dim$A,
@@ -144,7 +153,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
       t1 <- proc.time()
     }
-    unpersist(old.documents.rdd)
+
     if (doDebug) print(str(estep.output))
     
     if (doDebug) print("Mapping beta.")
@@ -166,14 +175,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
         beta.distributed <- beta$beta.distributed
       }
     }
-    if (doDebug) print("Lambda")
-    lambda.rdd <- map(documents.rdd, function(x) {c(x[[2]]$doc.num, x[[2]]$lambda)})
-    lambda <- reduce(lambda.rdd, rbind)
-    if (doDebug) print("rbound")
-    if (doDebug) print(str(lambda))
-    lambda <- lambda[order(lambda[,1]),]
-    lambda <- lambda[,-1]
-    if(doDebug) print(str(lambda))
+
 #    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
     
     if (doDebug) print("Opt mu")

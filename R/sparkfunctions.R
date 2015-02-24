@@ -356,9 +356,11 @@ if (doDebug) print("Big map")
     lambda <- which.min(ic)
     coef <- subM(mod$beta,lambda) #return coefficients
     if(is.null(count$m.i)) coef <- c(mod$a0[lambda], coef)
-    out[[i]] <- list(key = i, c(i, coef))
+    out[[i]] <- c(i, coef)
   } 
   rmNullObs(out)
+  out <- cbind(out)
+  list(key = split, value = out)
   }
   )
 if (doDebug)  print("going to reduce")
