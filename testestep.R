@@ -9,17 +9,17 @@ source("./R/stm.R")
 source("./R/stm.control.R")
 source("./R/STMconvergence.R")
 source("./R/STMreport.R")
-#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=c3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 15 -a ami-8e0352e6 launch vanillaspark
+#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=m3.large --spot-price=0.04 --region=us-east-1 --zone=us-east-1c -s 19 -a ami-8e0352e6 launch vanillaspark
 
 
 library(SparkR)
 
-spark.env <- list(spark.executor.memory="2500m", 
+spark.env <- list(spark.executor.memory="7g", 
 #                  spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-                  spark.driver.memory="2500m", 
-                  spark.driver.maxResultSize = "2500m"
+                  spark.driver.memory="7g", 
+                  spark.driver.maxResultSize = "7g"
 #                 ,spark.rdd.compress="true"
 )
 

@@ -99,7 +99,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   ############
   while(!stopits) {
     t1 <- proc.time()
-    cat("Distributing E-Step\t")
+    cat("Beginning E-Step\t")
     
     sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
     siginv <- solve(sigma)
@@ -116,6 +116,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
     if (doDebug) print("broadcast sigma")
     
+    # keep track of the pointer so we can unpersist it as soon as the next one gets created
     old.documents.rdd <- documents.rdd
     documents.rdd <- estep.lambda( 
       documents.rdd = documents.rdd,
@@ -126,18 +127,23 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       spark.context = spark.context,
       spark.partitions = spark.partitions,
       verbose) 
+    # persist this because we'll use it three times -- once to recover lambda, once for the hpb step, and 
+    # again when we re-make lambda
     persist(documents.rdd, "MEMORY_AND_DISK")
  #   print("initial map")
 
+    # The reason to get lambda here, is to force execution of the lambda-generating step, so that we can unpersist
+    # documents.rdd before performing the hpb step
     if (doDebug) print("Lambda")
     lambda.rdd <- map(documents.rdd, function(x) {c(x$dn, x$l)})
     lambda <- reduce(lambda.rdd, rbind)
-    print("lambda")
+    unpersist(old.documents.rdd)
+    
     if (doDebug) print(str(lambda))
     lambda <- lambda[order(lambda[,1]),]
     lambda <- lambda[,-1]
     if(doDebug) print(str(lambda))
-    unpersist(old.documents.rdd)
+
 
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
@@ -145,7 +151,6 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       K = settings$dim$K,
       V = length(vocab),
       beta.distributed = beta.distributed,
-      #      lambda.distributed = lambda.distributed,
       mu = mu, 
       siginv.broadcast = siginv.broadcast,
       sigmaentropy.broadcast = sigmaentropy.broadcast,
@@ -158,7 +163,6 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       t1 <- proc.time()
     }
 
-   # print(str(estep.output))
     
     if (doDebug) print("Mapping beta.")
 #    doDebug <- TRUE

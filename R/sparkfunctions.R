@@ -31,7 +31,7 @@ estep.lambda <- function(
         print(str(listElement))
       }
       document <- listElement
-      if (! is.numeric(document$a)) print(str(document))
+
       init <- document$l
       words <- document$d[1,]
       beta.i.lambda <- beta.in[[document$a]][,words,drop=FALSE]
@@ -50,7 +50,7 @@ estep.lambda <- function(
         document
       }
     )
-    print(paste("logistic partition output", object_size(out)))
+#    print(paste("logistic partition output", object_size(out)))
     out
   })
 }
@@ -188,7 +188,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   #Aggregate outcome data.
   if (! "list" %in% class(beta.ss)) print(str(beta.ss))
   if (doDebug) print(paste("mnreg beta ss", str(beta.ss)))
-  print(str(beta.ss))
+#  print(str(beta.ss))
   counts <- do.call(rbind,beta.ss)
 
 if (doDebug) print(str(counts))
