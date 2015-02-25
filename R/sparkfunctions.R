@@ -66,14 +66,6 @@ logisticnormal.lambda <- function(eta, mu, siginv, beta, doc) {
   optim.out$par
 }
 
-is.NullOb <- function(x) is.null(x) | all(sapply(x, is.null))
-
-## Recursively step down into list, removing all such objects 
-rmNullObs <- function(x) {
-  x <- Filter(Negate(is.NullOb), x)
-  lapply(x, function(x) if (is.list(x)) rmNullObs(x) else x)
-}
-
 estep.hpb <- function( 
   V, 
   K,
@@ -116,10 +108,6 @@ estep.hpb <- function(
       if (doDebug && document$doc.num == 1) print(str(document))
       eta <- document$l
       words <- document$d[1,]
-      if (! is.numeric(document$a)) {
-        print("hpb")
-        print(str(listElement))
-      }
       if (ncol(mu) > 1) {
         mu.i <- mu[,document$dn]
       } else {
@@ -139,35 +127,13 @@ estep.hpb <- function(
       c(document$dn, doc.results$bound)
 #      if (is.null(bound)) {bound <- bd} else {bound <<- rbind(bound, bd)}
     })
- #   print("making hpb partition")
-    #list(key = split %% 9,
     list(split, list(s = sigma.ss, 
                    b = beta.ss, 
                    bd = bound
                    ))
   })
-#   inter.rdd <- combineByKey(part.rdd, function(v) {
-#     print("create combiner")
-#     v
-#   }, function(C, v) {
-#     print("merge values")
-#     print(str(C))
-#     print(str(v))
-#     list(bound = rbind(C$bound, v$bound), 
-#          sigma.ss = C$sigma.ss + v$sigma.ss, 
-#          beta.ss = merge.beta(C$beta.ss, v$beta.ss))
-#   }, function(C1, C2) {
-#     print("merge combiners")
-#     print(str(C1))
-#     print(str(C2))
-#     list(bound = rbind(C1$bound, C2$bound), 
-#          sigma.ss = C1$sigma.ss + C2$sigma.ss, 
-#          beta.ss = merge.beta(C1$beta.ss, C2$beta.ss))
-#   }, as.integer(round(spark.partitions/4)))
 
-  ret <- reduce(part.rdd, function(x, y) {
-#    if (length(x) == 2) x <- x[[2]]
-#    if (length(y) == 2) y <- y[[2]]
+  reduce(part.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 3 && length(y) == 3) {
@@ -181,8 +147,6 @@ estep.hpb <- function(
       )
     }
   })
-#print("reduced")
-ret
 }
 
 merge.beta <- function(x, y) {
@@ -197,28 +161,6 @@ distribute.beta <- function(beta, spark.context, spark.partitions) {
       print(object_size(beta))
     }
    broadcast(sc = spark.context, beta)
-#       beta <- llply(beta, function(x) {
-#         index <<- index + 1
-#         list(key = index, 
-#              beta = x)
-#       })
-#     parallelize(spark.context, beta, length(beta))
-}
-
-distribute.lambda <- function(lambda, spark.context, spark.partitions) {
-  index <- 0
-  lambdalist <- alply(lambda, .margins=1, .fun = function(x) {
-    index <<- index + 1
-    #    list(key = betaindex[index], 
-    list(key = index, 
-         lambda = x)
-  })
-  #       beta <- llply(beta, function(x) {
-  #         index <<- index + 1
-  #         list(key = index, 
-  #              beta = x)
-  #       })
-  parallelize(spark.context, lambdalist, spark.partitions)
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions) {
@@ -226,20 +168,8 @@ distribute.mu <- function(mu, spark.context, spark.partitions) {
     print("mu")
     print(object_size(mu$mu))
   }
-#  if (is.null(mu$gamma)) {
-#    mu <- mu$mu
     mu <- mu$mu
     broadcast(spark.context, mu)#)
-#   } else {
-#     index <- 0
-#     mulist <- alply(mu$mu, .margins = 2, .dims = TRUE, 
-#                     .fun = function(x) {
-#                       index <<- index + 1
-#                       list(key = index,
-#                            mu.i <- x)
-#                     } )
-#     return(parallelize(spark.context, mulist,spark.partitions))
-#   }
 }
 
 mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
@@ -281,7 +211,6 @@ covar.broadcast <- settings$covar.broadcast
 
   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
 
-
   index <- 0
 if (doDebug) print("distributing counts")
   counts.list <- llply(counts, function(x) {
@@ -313,8 +242,7 @@ if (doDebug) print("distributing counts")
   
   #now do some setup of infrastructure
   verbose <- settings$verbose
-#  ctevery <- ifelse(transposed.length>100, floor(transposed.length/100), 1)
-#  out <- vector(mode="list", length=transposed.length)
+
   #now iterate over the vocabulary
 if (doDebug) print("Big map")
   mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
@@ -328,17 +256,9 @@ if (doDebug) print("Big map")
       } else {
         offset2 <- a.count$m.i + offset.in
       }
-#      m.i <- ifelse(is.null(count$m.i), 0, count$m.i) + offset.in
+
       mod <- NULL
-      if (i %% 10 == 1) {
-        print(str(a.count))
-        print("covar")
-        print(str(covar))
-        print("counts.i")
-        print(str(counts.i))
-        print("offset2")
-        print(str(offset2))
-      }
+
       while(is.null(mod)) {
         mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
                                offset=offset2, standardize=FALSE,
@@ -358,18 +278,21 @@ if (doDebug) print("Big map")
     if(is.null(a.count$m.i)) coef <- c(mod$a0[lambda], coef)
     c(i, coef)
   } )
-  out <- t(out)
-  print(str(out))
-  list(key = split, value = out)
+  list(value = out)
   }
   )
 if (doDebug)  print("going to reduce")
-coef <- reduce(mnreg.rdd, function(x,y) {
-  if ("list" %in% class(x)) x <- x[[2]]
-  if ("list" %in% class(y)) y <- y[[2]]
-  cbind(x, y)}) 
+
+  coef <- reduce(mnreg.rdd, function(x,y)  {   
+    if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
+    if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
+    rbind(x, y)
+    }
+  )
+coef <- t(coef)
 coef <- coef[,order(coef[1,])]
 coef <- coef[-1,]
+
 
 if (doDebug) print("reduced")
 
@@ -380,6 +303,7 @@ if (doDebug)  print("wrap up the function and redistribute beta")
     m <- coef[1,] 
     coef <- coef[-1,]
   }
+
   kappa <- split(coef, row(coef)) 
   ##
   #predictions 

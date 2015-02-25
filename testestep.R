@@ -14,14 +14,14 @@ source("./R/STMreport.R")
 
 library(SparkR)
 
-spark.env <- list(spark.executor.memory="2500m", 
-                  spark.storage.memoryFraction = "0.2",
-                  spark.serializer="org.apache.spark.serializer.KryoSerializer",
-                  spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-                  spark.driver.memory="2500m", 
-                  spark.driver.maxResultSize = "2500m"
-#                 ,spark.rdd.compress="true"
-)
+# spark.env <- list(spark.executor.memory="2500m", 
+#                   spark.storage.memoryFraction = "0.2",
+#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
+#                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+#                   spark.driver.memory="2500m", 
+#                   spark.driver.maxResultSize = "2500m"
+# #                 ,spark.rdd.compress="true"
+# )
 
 master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 
@@ -40,7 +40,7 @@ doDebug <- FALSE
 # results <- stm(documents = prep$documents,
 #                vocab = prep$vocab,
 #                data = prep$meta, 
-#                max.em.its = 20, 
+#                max.em.its = 1, 
 #                 content = ~treatment,
 #                 prevalence = ~ pid_rep + MetaID,
 #                init.type="Spectral",

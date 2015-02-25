@@ -127,7 +127,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       spark.partitions = spark.partitions,
       verbose) 
     persist(documents.rdd, "MEMORY_AND_DISK")
-    print("initial map")
+ #   print("initial map")
 
     if (doDebug) print("Lambda")
     lambda.rdd <- map(documents.rdd, function(x) {c(x$dn, x$l)})
