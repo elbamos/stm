@@ -158,23 +158,23 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       t1 <- proc.time()
     }
 
-    if (doDebug) print(str(estep.output))
+   # print(str(estep.output))
     
     if (doDebug) print("Mapping beta.")
 #    doDebug <- TRUE
     if (is.null(beta$kappa)) {
-      beta.ss <- estep.output$beta.ss / rowSums(estep.output$beta.ss)
+      beta.ss <- estep.output$b / rowSums(estep.output$b)
       beta.distributed <- broadcast(spark.context, beta.ss)
       beta$beta <- beta.ss
       beta$beta.distributed <- beta.distributed
     }  else {
       if(settings$tau$mode=="L1") {
         if (doDebug) print("mnreg.")
-        beta <- mnreg.spark(estep.output$beta.ss, settings, spark.context, spark.partitions)
+        beta <- mnreg.spark(estep.output$b, settings, spark.context, spark.partitions)
         beta.distributed <- beta$beta.distributed
       } else {
         if (doDebug) print("Reducing beta for jefreys kappa.")
-        beta <- stm:::jeffreysKappa(estep.output$beta.ss, kappa, settings) 
+        beta <- stm:::jeffreysKappa(estep.output$b, kappa, settings) 
         beta$beta.distributed <- distribute.beta(beta = beta, spark.context, spark.partitions)
         beta.distributed <- beta$beta.distributed
       }
@@ -188,12 +188,12 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     if (doDebug) print(str(mu.local))
     mu <- distribute.mu(mu.local, spark.context, spark.partitions)
     if (doDebug) print("Extract sigma")
-    sigma.ss <- estep.output$sigma.ss
+    sigma.ss <- estep.output$s
     if (doDebug) print("Opt sigma")
     sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                              mu=mu.local$mu, sigprior=settings$sigma$prior)
     
-    bound.ss <-  estep.output$bound
+    bound.ss <-  estep.output$bd
     bound.ss <- bound.ss[order(bound.ss[,1]),]
     bound.ss <- bound.ss[,-1]
     if (verbose) cat(sprintf("Completed M-Step (%d seconds). \n", floor(proc.time()-t1)[3]))

@@ -108,8 +108,8 @@ estep.hpb <- function(
       s <- sum(is.null(part)) 
       print(paste("In hpb map, ", s, " elements of the list are null."))
     }
-    bound <- NULL
-    laply(part, .fun = function(listElement) {
+    
+    bound <- laply(part, .fun = function(listElement) {
       if (is.null(listElement)) next
       if (doDebug && listElement[[1]] == 1) print(str(listElement))
       document <- listElement
@@ -136,16 +136,15 @@ estep.hpb <- function(
 
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
-      bd <- c(document$dn, doc.results$bound)
-      if (is.null(bound)) {bound <- bd} else {bound <<- rbind(bound, bd)}
+      c(document$dn, doc.results$bound)
+#      if (is.null(bound)) {bound <- bd} else {bound <<- rbind(bound, bd)}
     })
-    print("making hpb partition")
+ #   print("making hpb partition")
     #list(key = split %% 9,
-     list(split, list(s = sigma.ss, 
+    list(split, list(s = sigma.ss, 
                    b = beta.ss, 
                    bd = bound
-                   )
-              )
+                   ))
   })
 #   inter.rdd <- combineByKey(part.rdd, function(v) {
 #     print("create combiner")
@@ -167,26 +166,22 @@ estep.hpb <- function(
 #   }, as.integer(round(spark.partitions/4)))
 
   ret <- reduce(part.rdd, function(x, y) {
-    if (is.null(x) && is.null(y)) {
-      print ("both null")
-    } else {
-      print("not both null")
-    }
-    if (length(x) == 2) x <- x[[2]]
-    if (length(y) == 2) y <- y[[2]]
-    if (is.null(x) && !is.null(y)) return(y)
-    if (is.null(y) && !is.null(x)) return(x)
+#    if (length(x) == 2) x <- x[[2]]
+#    if (length(y) == 2) y <- y[[2]]
+    if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
+    if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 3 && length(y) == 3) {
       list(bd = rbind(x$bd, y$bd), 
            s = x$s + y$s, 
            b = merge.beta(x$b, y$b))
     } else { 
-      print("bad reduction match")
-      print(str(x))
-      print(str(y))
+      error(paste("bad reduction match",
+      str(x),
+      str(y))
+      )
     }
   })
-print("reduced")
+#print("reduced")
 ret
 }
 
@@ -263,6 +258,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   #Aggregate outcome data.
   if (! "list" %in% class(beta.ss)) print(str(beta.ss))
   if (doDebug) print(paste("mnreg beta ss", str(beta.ss)))
+  print(str(beta.ss))
   counts <- do.call(rbind,beta.ss)
 
 if (doDebug) print(str(counts))
@@ -291,8 +287,8 @@ if (doDebug) print("distributing counts")
   counts.list <- llply(counts, function(x) {
     index <<- index + 1
     list(
-           term = index, 
-          counts.i = x, 
+           t = index, 
+          c.i = x, 
           m.i = ifelse(is.null(m), NULL, m[index])
          )
   })
@@ -325,9 +321,8 @@ if (doDebug) print("Big map")
     offset.in <- value(offset.broadcast)
     covar <- value(covar.broadcast)
     out <- laply(part, .fun = function(a.count) {
-      if (doDebug) print(str(part))
-      i <- a.count$term
-      counts.i <- a.count$counts.i
+      i <- a.count$t
+      counts.i <- a.count$c.i
       if (is.null(a.count$m.i)) {
         offset2 <- offset.in
       } else {
@@ -335,6 +330,15 @@ if (doDebug) print("Big map")
       }
 #      m.i <- ifelse(is.null(count$m.i), 0, count$m.i) + offset.in
       mod <- NULL
+      if (i %% 10 == 1) {
+        print(str(a.count))
+        print("covar")
+        print(str(covar))
+        print("counts.i")
+        print(str(counts.i))
+        print("offset2")
+        print(str(offset2))
+      }
       while(is.null(mod)) {
         mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
                                offset=offset2, standardize=FALSE,
@@ -355,6 +359,7 @@ if (doDebug) print("Big map")
     c(i, coef)
   } )
   out <- t(out)
+  print(str(out))
   list(key = split, value = out)
   }
   )
