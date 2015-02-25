@@ -137,15 +137,15 @@ estep.hpb <- function(
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
       bd <- c(document$dn, doc.results$bound)
-      if (is.null(bound)) {bound <- bd} else {bound <- rbind(bound, bd)}
+      if (is.null(bound)) {bound <- bd} else {bound <<- rbind(bound, bd)}
     })
     print("making hpb partition")
     #list(key = split %% 9,
-     list(s = sigma.ss, 
+     list(split, list(s = sigma.ss, 
                    b = beta.ss, 
                    bd = bound
                    )
-     #         )
+              )
   })
 #   inter.rdd <- combineByKey(part.rdd, function(v) {
 #     print("create combiner")
