@@ -108,7 +108,8 @@ estep.hpb <- function(
       s <- sum(is.null(part)) 
       print(paste("In hpb map, ", s, " elements of the list are null."))
     }
-    bound <- laply(part, .fun = function(listElement) {
+    bound <- NULL
+    laply(part, .fun = function(listElement) {
       if (is.null(listElement)) next
       if (doDebug && listElement[[1]] == 1) print(str(listElement))
       document <- listElement
@@ -135,18 +136,16 @@ estep.hpb <- function(
 
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
-      c(document$dn, doc.results$bound)
+      bd <- c(document$dn, doc.results$bound)
+      if (is.null(bound)) {bound <- bd} else {bound <- rbind(bound, bd)}
     })
     print("making hpb partition")
     #list(key = split %% 9,
-     ret <-         list(s = sigma.ss, 
+     list(s = sigma.ss, 
                    b = beta.ss, 
                    bd = bound
                    )
      #         )
-     print(str(ret))
-     ret
-         
   })
 #   inter.rdd <- combineByKey(part.rdd, function(v) {
 #     print("create combiner")
