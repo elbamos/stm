@@ -47,7 +47,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   if (doDebug) print("Distributing globals")
   includePackage(spark.context, "glmnet")
   includePackage(spark.context, "plyr")
-  includePackage(spark.context, "pryr")
+#  includePackage(spark.context, "pryr")
 #  includePackage(spark.context, "Matrix")
   # if we change documents to have a key as the first element, then we can use an RDD
   if (is.null(names(documents))) names(documents) <- 1:length(documents)
@@ -163,6 +163,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
 #    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
     print("mu")
     if (doDebug) print("Opt mu")
+#    print(str(lambda))
     mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                              covar=settings$covariates$X, settings$gamma$enet)
     if (doDebug) print(str(mu.local))

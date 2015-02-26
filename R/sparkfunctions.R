@@ -84,13 +84,14 @@ estep.hpb <- function(
   if (doDebug) print("mapping e-step")
 #  print(count(documents.rdd))
   part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split, part) {
+#    require(glmnet)
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
     }
     sigma.ss <- diag(0, nrow=(K-1))
     
-    lambda <- rep(NULL, times = K - 1)
+    lambda <- rep(NULL, times = K)
     
     mu <- value(mu.distributed)
     beta.in <- value(beta.distributed)
@@ -122,10 +123,9 @@ estep.hpb <- function(
           siginv=siginv, beta=beta.in[[document$a]][,words,drop=FALSE], Ndoc=Ndoc,
           sigmaentropy=sigmaentropy)
       
-
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
-      lambda <<- rbind(lambda, document$l)
+      lambda <<- rbind(lambda, c(document$dn, document$l))
       c(document$dn, doc.results$bound)
 #      if (is.null(bound)) {bound <- bd} else {bound <<- rbind(bound, bd)}
     })
