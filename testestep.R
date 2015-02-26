@@ -59,7 +59,7 @@ poliresults <- stm(documents = documents,
                     content = ~rating,
                     prevalence = ~ s(day) + blog,
                    K = 50, spark.context = spark.context, 
-                   init = "Spectral"#,
+                   init = "Spectral",
                    spark.partitions = 38
 )
 # save(poliresuls, file="poliresults")

@@ -137,7 +137,7 @@ estep.hpb <- function(
                    ))
   })
 
-  reduce(part.rdd, op = function(x, y) {
+  reduce(part.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 4 && length(y) == 4) {
