@@ -88,8 +88,9 @@ estep.hpb <- function(
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
     }
-    
     sigma.ss <- diag(0, nrow=(K-1))
+    
+    lambda <- rep(NULL, times = K - 1)
     
     mu <- value(mu.distributed)
     beta.in <- value(beta.distributed)
@@ -124,22 +125,27 @@ estep.hpb <- function(
 
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
+      lambda <<- rbind(lambda, document$l)
       c(document$dn, doc.results$bound)
 #      if (is.null(bound)) {bound <- bd} else {bound <<- rbind(bound, bd)}
     })
+#    lambda <- lambda[-1,]
     list(split, list(s = sigma.ss, 
                    b = beta.ss, 
-                   bd = bound
+                   bd = bound,
+                   l = lambda
                    ))
   })
 
-  reduce(part.rdd, function(x, y) {
+  reduce(part.rdd, op = function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
-    if (length(x) == 3 && length(y) == 3) {
+    if (length(x) == 4 && length(y) == 4) {
       list(bd = rbind(x$bd, y$bd), 
            s = x$s + y$s, 
-           b = merge.beta(x$b, y$b))
+           b = merge.beta(x$b, y$b), 
+           l = rbind(x$l, y$l)
+      )
     } else { 
       error(paste("bad reduction match",
       str(x),

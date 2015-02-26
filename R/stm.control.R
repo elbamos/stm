@@ -130,20 +130,10 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     # persist this because we'll use it three times -- once to recover lambda, once for the hpb step, and 
     # again when we re-make lambda
     persist(documents.rdd, "MEMORY_AND_DISK")
- #   print("initial map")
-
-    # The reason to get lambda here, is to force execution of the lambda-generating step, so that we can unpersist
-    # documents.rdd before performing the hpb step
-    print("Lambda")
-    lambda.rdd <- map(documents.rdd, function(x) {c(x$dn, x$l)})
-    lambda <- reduce(lambda.rdd, rbind)
+    # This is here to force execution and cacheing of documents.rdd with updated lambda  
+    toss <- count(documents.rdd)
     unpersist(old.documents.rdd)
     
-    if (doDebug) print(str(lambda))
-    lambda <- lambda[order(lambda[,1]),]
-    lambda <- lambda[,-1]
-    if(doDebug) print(str(lambda))
-
     print("hpb")
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
@@ -158,14 +148,33 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       spark.partitions = spark.partitions,
       verbose) 
 
+
     if(verbose) {
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
       t1 <- proc.time()
     }
-
+    
+    lambda <- estep.output$l
+#     if (doDebug) print(str(lambda))
+    lambda <- lambda[order(lambda[,1]),]
+    lambda <- lambda[,-1]
+    if(doDebug) print(str(lambda))
+    
+#    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
+    print("mu")
+    if (doDebug) print("Opt mu")
+    mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
+                             covar=settings$covariates$X, settings$gamma$enet)
+    if (doDebug) print(str(mu.local))
+    mu <- distribute.mu(mu.local, spark.context, spark.partitions)
+    if (doDebug) print("Extract sigma")
+    sigma.ss <- estep.output$s
+    if (doDebug) print("Opt sigma")
+    sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
+                             mu=mu.local$mu, sigprior=settings$sigma$prior)
     
     print("beta.")
-#    doDebug <- TRUE
+    #    doDebug <- TRUE
     if (is.null(beta$kappa)) {
       beta.ss <- estep.output$b / rowSums(estep.output$b)
       beta.distributed <- broadcast(spark.context, beta.ss)
@@ -183,19 +192,6 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
         beta.distributed <- beta$beta.distributed
       }
     }
-
-#    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
-    print("mu, etc.")
-    if (doDebug) print("Opt mu")
-    mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
-                             covar=settings$covariates$X, settings$gamma$enet)
-    if (doDebug) print(str(mu.local))
-    mu <- distribute.mu(mu.local, spark.context, spark.partitions)
-    if (doDebug) print("Extract sigma")
-    sigma.ss <- estep.output$s
-    if (doDebug) print("Opt sigma")
-    sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
-                             mu=mu.local$mu, sigprior=settings$sigma$prior)
     
     bound.ss <-  estep.output$bd
     bound.ss <- bound.ss[order(bound.ss[,1]),]
