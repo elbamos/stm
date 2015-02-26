@@ -18,8 +18,8 @@ stm.init <- function(documents, settings) {
   #Different Modes
   if(mode=="LDA") {
     resetdocs <- lapply(documents, function(x) {
-                        x[1, ] <- as.integer(x[1, ] - 1)
-                        x})
+      x[1, ] <- as.integer(x[1, ] - 1)
+      x})
     mod <- lda.collapsed.gibbs.sampler(resetdocs, K, 1:V, 
                                        num.iterations=nits, burnin=burnin, 
                                        alpha=alpha, eta=eta)
@@ -30,7 +30,7 @@ stm.init <- function(documents, settings) {
     
     theta <- as.numeric(mod$document_expects) #these are actually sums not expects
     theta[theta==0] <- .01 #stabilize the 0's for the log case
-    theta <- Matrix(theta, nrow=K) #reorganize
+    theta <- matrix(theta, nrow=K) #reorganize
     Ndoc <- colSums(theta) #get word counts by doc
     theta <- t(theta)/Ndoc  #norm to proportions
     lambda <- log(theta) - log(theta[,K]) #get the log-space version
@@ -60,37 +60,19 @@ stm.init <- function(documents, settings) {
     wprob <- wprob/sum(wprob)
     Q <- gram(mat)
     #verify that there are no zeroes
-    keep <- NULL
     Qsums <- rowSums(Q)
-    if(any(Qsums==0)) {
-      #if there are zeroes, we want to remove them for just the anchor word procedure.
-      temp.remove <- which(Qsums==0)
-      keep <- which(Qsums!=0)
-      Q <- Q[-temp.remove,-temp.remove]
-      Qsums <- Qsums[-temp.remove]
-      wprob <- wprob[-temp.remove]
-    }
-    Qbar <- Q/Qsums
-    
+    if(any(Qsums==0)) stop("Failure in spectral initialization. 
+                           A row of the co-occurence is exactly zero indicating 
+                           that a certain word appears only in documents alone. 
+                           Remove infrequent words or change initialization type.")
     # (2) anchor words
     if(verbose) cat("\t Finding anchor words...\n \t")
+    Qbar <- Q/Qsums
     anchor <- fastAnchor(Qbar, K=K, verbose=verbose)
-
+    
     # (3) recoverKL
     if(verbose) cat("\n\t Recovering initialization...\n \t")
     beta <- recoverL2(Q, anchor, wprob, verbose=verbose)$A
-    
-    if(!is.null(keep)) {
-      #if there were zeroes, reintroduce them
-      #assign missing compoinents the machine double epsilon
-      #and renormalize just in case.
-      beta.new <- matrix(0, nrow=K, ncol=V)
-      beta.new[,keep] <- beta
-      beta.new[,temp.remove] <- .Machine$double.eps 
-      beta <- beta.new/rowSums(beta.new)  
-      rm(beta.new)
-    }
-    
     # (4) generate other parameters
     mu <- matrix(0, nrow=(K-1),ncol=1)
     sigma <- diag(20, nrow=(K-1))
@@ -103,7 +85,7 @@ stm.init <- function(documents, settings) {
   #initialize the kappa vectors
   if(!settings$kappa$LDAbeta) {
     model$kappa <- kappa.init(documents, K, V, A, interactions=settings$kappa$interactions)
-  }  
+  }
   return(model)
 }
 
@@ -139,11 +121,11 @@ kappa.init <- function(documents, K, V, A, interactions) {
   #Create a running sum of the kappa parameters starting with m
   kappa.out$kappasum <- vector(mode="list", length=A)
   for (a in 1:A) {
-    kappa.out$kappasum[[a]] <- Matrix(m, nrow=K, ncol=V, byrow=TRUE)
+    kappa.out$kappasum[[a]] <- matrix(m, nrow=K, ncol=V, byrow=TRUE)
   }
   
   #create covariates. one element per item in parameter list.
-    #generation by type because its conceptually simpler
+  #generation by type because its conceptually simpler
   if(!aspectmod & !interact) {
     kappa.out$covar <- list(k=1:K, a=rep(NA, parLength), type=rep(1,K))
   }
@@ -152,8 +134,8 @@ kappa.init <- function(documents, K, V, A, interactions) {
   }
   if(interact) {
     kappa.out$covar <- list(k=c(1:K,rep(NA,A), rep(1:K,A)), 
-                        a=c(rep(NA, K), 1:A, rep(1:A,each=K)), 
-                        type=c(rep(1,K), rep(2,A), rep(3,K*A)))            
+                            a=c(rep(NA, K), 1:A, rep(1:A,each=K)), 
+                            type=c(rep(1,K), rep(2,A), rep(3,K*A)))            
   }
   return(kappa.out)
 }

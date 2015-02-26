@@ -2,7 +2,7 @@
 #compared to the original we have more initializations, 
 # more explicit options, trimmed fat, memoization
 
-stm.control <- function(documents, vocab, settings, model, spark.context, spark.partitions = NULL) {
+stm.control.spark <- function(documents, vocab, settings, model, spark.context, spark.partitions = NULL) {
   
   globaltime <- proc.time()
   verbose <- settings$verbose
@@ -13,6 +13,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   if(is.null(model)) {
     if(verbose) cat("Beginning Initialization.\n")
     #initialize
+    print("here I am")
     model <- stm:::stm.init(documents, settings)
     #unpack
     mu <- list(mu=model$mu)
@@ -44,55 +45,62 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
   betaindex <- settings$covariates$betaindex
   stopits <- FALSE
   
-  if (doDebug) print("Distributing globals")
+  if (doDebug || verbose) print("Distributing globals.")
+  # sensible default partitioning
+  if (is.null(spark.partitions)) spark.partitions <- as.integer(2 * round(log(settings$dim$N * settings$dim$K * settings$dim$A)))
   includePackage(spark.context, "glmnet")
   includePackage(spark.context, "plyr")
-#  includePackage(spark.context, "pryr")
-#  includePackage(spark.context, "Matrix")
-  # if we change documents to have a key as the first element, then we can use an RDD
-  if (is.null(names(documents))) names(documents) <- 1:length(documents)
-  doc.keys <- names(documents)
+
   index <- 0
   doclist <- llply(documents, .fun = function(x) {
     index <<- index + 1
-#    list(key = index, 
-         list(#key = doc.keys[index], 
-              dn = index,
-              d = x,
-              a = as.integer(betaindex[index]), 
-              l = lambda[index,])#)
+    list( 
+      dn = index,
+      d = x,
+      a = as.integer(betaindex[index]), 
+      l = lambda[index,])
   })
-  print(paste("doclist size", object_size(doclist)))
-  documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
-  print("Distributed documents")
-
+  # documents.rdd is a value list (not a pair list).  Each iteration, 
+  # the e-step runs logisticnormal inside mapPartitionsAsIndex to update lambda.
+  # This produces a new documents.rdd, which is persisted in memory and on disk.
+  # (This should really be changed to be user controllable.)
+  # Then, hpb is executed through a mapPartitionsAsIndex, and the output
+  # from each partition is merged.  All partitions' outputs are merged in a reduce.
+  # Then, the prior iteration's documents.rdd is unpersisted, and the m-step is executed.
   
+  # beta, mu, sigma, and siginv are broadcast variables.  It may be worth exploring
+  # whether beta or mu could be implemented as rdd's which are then joined with documents.rdd
+  # during the e-step. This would probably require accumulators, which have not 
+  # yet been implemented in SparkR, to be efficient.
+  documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
+
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu <- distribute.mu(mu, spark.context)
-#  lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
-  
-  #The covariate matrix
-  rows <- settings$dim$A * settings$dim$K
-  if(settings$dim$A==1) { #Topic Model
-    covar <- diag(1, nrow=settings$dim$K)
-  }
-  if(settings$dim$A!=1) { #Topic-Aspect Models
-    #Topics
-    veci <- 1:rows
-    vecj <- rep(1:settings$dim$K,settings$dim$A)
-    #aspects
-    veci <- c(veci,1:rows)
-    vecj <- c(vecj,rep((settings$dim$K+1):(settings$dim$K+settings$dim$A), each=settings$dim$K))
-    if(settings$kappa$interactions) {
-      veci <- c(veci, 1:rows)
-      vecj <- c(vecj, (settings$dim$K+settings$dim$A+1):(settings$dim$K+settings$dim$A+rows))
+
+  if(!is.null(beta$kappa) && settings$tau$mode=="L1") {
+    # If we are going to be running mnreg, broadcast the covariate matrix since
+    # its a global.
+    rows <- settings$dim$A * settings$dim$K
+    if(settings$dim$A==1) { #Topic Model
+      covar <- diag(1, nrow=settings$dim$K)
     }
-    vecv <- rep(1,length(veci))
-    covar <- sparseMatrix(veci, vecj, x=vecv)
-  }  
-  settings$covar <- covar
-  settings$covar.broadcast <- broadcast(spark.context, covar)  
-  
+    if(settings$dim$A!=1) { #Topic-Aspect Models
+      #Topics
+      veci <- 1:rows
+      vecj <- rep(1:settings$dim$K,settings$dim$A)
+      #aspects
+      veci <- c(veci,1:rows)
+      vecj <- c(vecj,rep((settings$dim$K+1):(settings$dim$K+settings$dim$A), each=settings$dim$K))
+      if(settings$kappa$interactions) {
+        veci <- c(veci, 1:rows)
+        vecj <- c(vecj, (settings$dim$K+settings$dim$A+1):(settings$dim$K+settings$dim$A+rows))
+      }
+      vecv <- rep(1,length(veci))
+      covar <- sparseMatrix(veci, vecj, x=vecv)
+    }  
+    settings$covar <- covar
+    settings$covar.broadcast <- broadcast(spark.context, covar)  
+  }
   if (doDebug) print("Distributed initial rdd's")
   ############
   #Step 2: Run EM
@@ -101,40 +109,29 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     t1 <- proc.time()
     cat("Beginning E-Step\t")
     
+    # siginv and sigmaentropy have to be broadcast each pass through the loop
     sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
     siginv <- solve(sigma)
-    
-    #broadcast what we need
-    if (doDebug) {
-      print("sigma")
-      print(object_size(sigma))
-      print("siginv")
-      print(object_size(siginv))
-    }
     siginv.broadcast <- broadcast(spark.context, siginv)
-    if (doDebug) print("broadcast siginv")
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
-    if (doDebug) print("broadcast sigma")
     
     # keep track of the pointer so we can unpersist it as soon as the next one gets created
     old.documents.rdd <- documents.rdd
     documents.rdd <- estep.lambda( 
       documents.rdd = documents.rdd,
       beta.distributed = beta.distributed,
-#      lambda.distributed = lambda.distributed,
       mu = mu, 
       siginv.broadcast = siginv.broadcast,
       spark.context = spark.context,
       spark.partitions = spark.partitions,
       verbose) 
-    # persist this because we'll use it three times -- once to recover lambda, once for the hpb step, and 
-    # again when we re-make lambda
+    # persist this because we'll use it twice - once for the hpb step, and 
+    # again when we update lambda
     persist(documents.rdd, "MEMORY_AND_DISK")
     # This is here to force execution and cacheing of documents.rdd with updated lambda  
-    toss <- count(documents.rdd)
+ #   toss <- count(documents.rdd)
     unpersist(old.documents.rdd)
     
-    print("hpb")
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
       A = settings$dim$A,
@@ -148,55 +145,39 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
       spark.partitions = spark.partitions,
       verbose) 
 
-
+    print(str(estep.output))
+    
     if(verbose) {
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
       t1 <- proc.time()
     }
-    
+
     lambda <- estep.output$l
-#     if (doDebug) print(str(lambda))
-    lambda <- lambda[order(lambda[,1]),]
-    lambda <- lambda[,-1]
-    if(doDebug) print(str(lambda))
-    
-#    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
-    print("mu")
-    if (doDebug) print("Opt mu")
-#    print(str(lambda))
     mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                              covar=settings$covariates$X, settings$gamma$enet)
-    if (doDebug) print(str(mu.local))
     mu <- distribute.mu(mu.local, spark.context, spark.partitions)
-    if (doDebug) print("Extract sigma")
     sigma.ss <- estep.output$s
-    if (doDebug) print("Opt sigma")
     sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                              mu=mu.local$mu, sigprior=settings$sigma$prior)
     
-    print("beta.")
-    #    doDebug <- TRUE
     if (is.null(beta$kappa)) {
-      beta.ss <- estep.output$b / rowSums(estep.output$b)
-      beta.distributed <- broadcast(spark.context, beta.ss)
+      beta.ss <- rbind(estep.output$b)[[1]]
+      beta.ss <- beta.ss / rowSums(beta.ss)
+      beta.distributed <- distribute.beta(beta = list(beta.ss), spark.context = spark.context, spark.partitions = spark.partitions)
       beta$beta <- beta.ss
       beta$beta.distributed <- beta.distributed
     }  else {
       if(settings$tau$mode=="L1") {
-        if (doDebug) print("mnreg.")
         beta <- mnreg.spark(estep.output$b, settings, spark.context, spark.partitions)
         beta.distributed <- beta$beta.distributed
       } else {
-        if (doDebug) print("Reducing beta for jefreys kappa.")
         beta <- stm:::jeffreysKappa(estep.output$b, kappa, settings) 
-        beta$beta.distributed <- distribute.beta(beta = beta, spark.context, spark.partitions)
+        beta$beta.distributed <- distribute.beta(beta = beta$beta, spark.context, spark.partitions)
         beta.distributed <- beta$beta.distributed
       }
     }
-    
-    bound.ss <-  estep.output$bd
-    bound.ss <- bound.ss[order(bound.ss[,1]),]
-    bound.ss <- bound.ss[,-1]
+    bound.ss <- estep.output$bd  
+
     if (verbose) cat(sprintf("Completed M-Step (%d seconds). \n", floor(proc.time()-t1)[3]))
     #Convergence
     convergence <- stm:::convergence.check(bound.ss, convergence, settings)

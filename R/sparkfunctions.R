@@ -1,6 +1,7 @@
 doDebug <- FALSE
 
-
+# processes documents.rdd, running logisticnormal and 
+# producing a new documents.rdd with an updated lambda
 estep.lambda <- function( 
   documents.rdd,
   beta.distributed,
@@ -10,55 +11,37 @@ estep.lambda <- function(
   spark.partitions,
   verbose) {
   
-  if (doDebug) print("Entering e-step")
-  
-  # perform logistic normal
-  if (doDebug) print("mapping e-step lambda")
   mapPartitionsWithIndex(documents.rdd, function(split, part) {   
     mu <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv <- value(siginv.broadcast)
-#    print(paste("Entering logist normal 1", length(part)))
-    out <- llply(.data = part, .fun = function(listElement) {
-      if (doDebug) print(paste("logistic normal 1 start", class(listElement)))
-      if (doDebug && is.null(listElement[[1]])) {
-        print("logistic normal 1 list element is null")
-        print(str(listElement))
-        print(str(part))
-      }
-      if (doDebug && listElement[[1]] == 1) {
-        print("logistic normal 1")
-        print(str(listElement))
-      }
+    llply(.data = part, .fun = function(listElement) {
       document <- listElement
-
       init <- document$l
-      words <- document$d[1,]
-      beta.i.lambda <- beta.in[[document$a]][,words,drop=FALSE]
+      if (is.null(document$nd)) {
+        document$nd <- sum(document$d[2,])
+      }
+      beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
       if (ncol(mu) > 1) {
         mu.i <- mu[,document$dn]
       } else {
         mu.i <- as.numeric(mu)
       }
-        
-        document$lambda <- logisticnormal.lambda(eta = init, 
-                                            mu = mu.i, 
-                                            siginv = siginv,
-                                            beta = beta.i.lambda, 
-                                            doc = document$d
-        )
-        document
-      }
+      
+      document$l <- logisticnormal.lambda(eta = init, 
+                                          mu = mu.i, 
+                                          siginv = siginv,
+                                          beta = beta.i.lambda, 
+                                          doc.ct = document$d[2,], 
+                                          Ndoc = document$nd
+      )
+      document
+    }
     )
-#    print(paste("logistic partition output", object_size(out)))
-    out
   })
 }
 
-logisticnormal.lambda <- function(eta, mu, siginv, beta, doc) {
-  doc.ct <- doc[2,]
-  Ndoc <- sum(doc.ct)
-  #even at K=100, BFGS is faster than L-BFGS
+logisticnormal.lambda <- function(eta, mu, siginv, beta, doc.ct, Ndoc) {
   optim.out <- optim(par=eta, fn=stm:::lhood, gr=stm:::grad,
                      method="BFGS", control=list(maxit=500),
                      doc.ct=doc.ct, mu=mu,
@@ -66,6 +49,7 @@ logisticnormal.lambda <- function(eta, mu, siginv, beta, doc) {
   optim.out$par
 }
 
+# maps and reduces documents.rdd to collect sufficient stats
 estep.hpb <- function( 
   V, 
   K,
@@ -79,35 +63,22 @@ estep.hpb <- function(
   spark.partitions,
   verbose) {
 
-  
-  # perform logistic normal
-  if (doDebug) print("mapping e-step")
-#  print(count(documents.rdd))
+  # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
+  # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
   part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split, part) {
-#    require(glmnet)
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
     }
     sigma.ss <- diag(0, nrow=(K-1))
-    
-    lambda <- rep(NULL, times = K)
+    lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
     
     mu <- value(mu.distributed)
     beta.in <- value(beta.distributed)
-    #    lambda.in <- value(lambda.distributed)
     siginv <- value(siginv.broadcast)
     sigmaentropy <- value(sigmaentropy.broadcast)
-    if (doDebug) {
-      s <- sum(is.null(part)) 
-      print(paste("In hpb map, ", s, " elements of the list are null."))
-    }
     
-    bound <- laply(part, .fun = function(listElement) {
-      if (is.null(listElement)) next
-      if (doDebug && listElement[[1]] == 1) print(str(listElement))
-      document <- listElement
-      if (doDebug && document$doc.num == 1) print(str(document))
+    bound <- laply(part, .fun = function(document) {
       eta <- document$l
       words <- document$d[1,]
       if (ncol(mu) > 1) {
@@ -116,28 +87,24 @@ estep.hpb <- function(
         mu.i <- as.numeric(mu)
       }
       
-      doc.ct <- document$d[2,]
-      Ndoc <- sum(doc.ct)
       #Solve for Hessian/Phi/Bound returning the result
-      doc.results <- stm:::hpb(eta, doc.ct=doc.ct, mu=mu.i,
-          siginv=siginv, beta=beta.in[[document$a]][,words,drop=FALSE], Ndoc=Ndoc,
+      doc.results <- stm:::hpb(document$l, doc.ct=document$d[2,], mu=mu.i,
+          siginv=siginv, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
           sigmaentropy=sigmaentropy)
       
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
       lambda <<- rbind(lambda, c(document$dn, document$l))
       c(document$dn, doc.results$bound)
-#      if (is.null(bound)) {bound <- bd} else {bound <<- rbind(bound, bd)}
     })
-#    lambda <- lambda[-1,]
     list(split, list(s = sigma.ss, 
                    b = beta.ss, 
                    bd = bound,
                    l = lambda
                    ))
   })
-
-  reduce(part.rdd, function(x, y) {
+  # merge the sufficient stats generated for each partition
+  out <- reduce(part.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 4 && length(y) == 4) {
@@ -153,6 +120,11 @@ estep.hpb <- function(
       )
     }
   })
+  bound.ss <- out$bd[order(out$bd[,1]),]
+  out$bd <- bound.ss[,2]
+  lambda <- out$l[order(out$l[,1]),]
+  out$l <- lambda[,-1]
+  out
 }
 
 merge.beta <- function(x, y) {
@@ -161,19 +133,10 @@ merge.beta <- function(x, y) {
 }
 
 distribute.beta <- function(beta, spark.context, spark.partitions) {
-    index <- 0
-    if (doDebug) {
-      print("beta")
-      print(object_size(beta))
-    }
    broadcast(sc = spark.context, beta)
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions) {
-  if (doDebug) {
-    print("mu")
-    print(object_size(mu$mu))
-  }
     mu <- mu$mu
     broadcast(spark.context, mu)#)
 }
@@ -192,17 +155,10 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   ic.k <- settings$tau$ic.k
   thresh <- settings$tau$tol
   #Aggregate outcome data.
-  if (! "list" %in% class(beta.ss)) print(str(beta.ss))
-  if (doDebug) print(paste("mnreg beta ss", str(beta.ss)))
-#  print(str(beta.ss))
+  
   counts <- do.call(rbind,beta.ss)
-
-if (doDebug) print(str(counts))
-
-#
-# Testing showed that covar was a constant -- if this is incorrect please let me know.
-#
-covar.broadcast <- settings$covar.broadcast
+  
+  covar.broadcast <- settings$covar.broadcast
   
   if(fixedintercept) {  
     m <- settings$dim$wcounts$x
@@ -210,24 +166,23 @@ covar.broadcast <- settings$covar.broadcast
   } else {
     m <- NULL #have to assign this to null to keep code simpler below
   }
-#  m.broadcast <- broadcast(spark.context, m)
   mult.nobs <- rowSums(counts) #number of multinomial draws in the sample
   offset <- log(mult.nobs)
   offset.broadcast <- broadcast(spark.context, offset)
-
+  
+  # it is cheaper to re-distribute counts as an RDD each pass through the loop than it would be to 
+  # convert the matrix from rows to columns.  This is something potentially worth revisiting
+  # for very large data sets.
   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
-
   index <- 0
-if (doDebug) print("distributing counts")
   counts.list <- llply(counts, function(x) {
     index <<- index + 1
     list(
-           t = index, 
-          c.i = x, 
-          m.i = ifelse(is.null(m), NULL, m[index])
-         )
+      t = index, 
+      c.i = x, 
+      m.i = ifelse(is.null(m), NULL, m[index])
+    )
   })
-
   counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
   rm(counts.list)
 
@@ -246,12 +201,10 @@ if (doDebug) print("distributing counts")
     out
   }
   
-  #now do some setup of infrastructure
   verbose <- settings$verbose
 
-  #now iterate over the vocabulary
-if (doDebug) print("Big map")
   mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
+    # each part should be a column from counts, representing a single vocabulary term
     offset.in <- value(offset.broadcast)
     covar <- value(covar.broadcast)
     out <- laply(part, .fun = function(a.count) {
@@ -264,7 +217,6 @@ if (doDebug) print("Big map")
       }
 
       mod <- NULL
-
       while(is.null(mod)) {
         mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
                                offset=offset2, standardize=FALSE,
@@ -287,23 +239,16 @@ if (doDebug) print("Big map")
   list(value = out)
   }
   )
-if (doDebug)  print("going to reduce")
 
   coef <- reduce(mnreg.rdd, function(x,y)  {   
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     rbind(x, y)
-    }
-  )
-coef <- t(coef)
-coef <- coef[,order(coef[1,])]
-coef <- coef[-1,]
+  })
+  coef <- t(coef)
+  coef <- coef[,order(coef[1,])]
+  coef <- coef[-1,]
 
-
-if (doDebug) print("reduced")
-
-if (doDebug)  print("wrap up the function and redistribute beta")
-  
   if(!fixedintercept) {
     #if we estimated the intercept add it in
     m <- coef[1,] 
@@ -315,23 +260,22 @@ if (doDebug)  print("wrap up the function and redistribute beta")
   #predictions 
   ##
   #linear predictor
-covar <- settings$covar
+  covar <- settings$covar
 
  linpred <- as.matrix(covar%*%coef) 
-
+ 
  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
-#softmax
+ #softmax
  explinpred <- exp(linpred)
-
-  beta <- explinpred/rowSums(explinpred)
-
-  beta <- split(beta, rep(1:A, each=K))
-
-  #wrangle into the list structure
-  beta <- lapply(beta, matrix, nrow=K)
-  beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
-
-  kappa <- list(m=m, params=kappa)
-  out <- list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
-  return(out)
+ 
+ beta <- explinpred/rowSums(explinpred)
+ 
+ beta <- split(beta, rep(1:A, each=K))
+ 
+ #wrangle into the list structure
+ beta <- lapply(beta, matrix, nrow=K)
+ beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
+ 
+ kappa <- list(m=m, params=kappa)
+ list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
 }
