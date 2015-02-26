@@ -19,7 +19,7 @@ spark.env <- list(spark.executor.memory="28g",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
                   spark.driver.memory="28g", 
-                  spark.driver.maxResultSize = "28g",
+                  spark.driver.maxResultSize = "28g"
 #                  spark.cores.max = 1#,
 #                 ,spark.rdd.compress="true"
 )
