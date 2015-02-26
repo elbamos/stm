@@ -9,17 +9,18 @@ source("./R/stm.R")
 source("./R/stm.control.R")
 source("./R/STMconvergence.R")
 source("./R/STMreport.R")
-#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=m3.large --spot-price=0.04 --region=us-east-1 --zone=us-east-1c -s 19 -a ami-8e0352e6 launch vanillaspark
+#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=c3.4xlarge --spot-price=0.4 --region=us-east-1 --zone=us-east-1e -s 19 -a ami-8e0352e6 launch vanillaspark
 
 
 library(SparkR)
 
-spark.env <- list(spark.executor.memory="7g", 
+spark.env <- list(spark.executor.memory="28g", 
 #                  spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-                  spark.driver.memory="7g", 
-                  spark.driver.maxResultSize = "7g"
+                  spark.driver.memory="28g", 
+                  spark.driver.maxResultSize = "28g",
+                  spark.cores.max = 1#,
 #                 ,spark.rdd.compress="true"
 )
 
@@ -57,9 +58,9 @@ poliresults <- stm(documents = documents,
                    max.em.its = 200, 
                     content = ~rating,
                     prevalence = ~ s(day) + blog,
-                   K = 50, spark.context = spark.context, 
-                   init = "Spectral",
-                   spark.partitions = 36
+                   K = 50, #spark.context = spark.context, 
+                   init = "Spectral"#,
+#                   spark.partitions = 36
 )
 # save(poliresuls, file="poliresults")
 # 

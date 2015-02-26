@@ -134,7 +134,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
 
     # The reason to get lambda here, is to force execution of the lambda-generating step, so that we can unpersist
     # documents.rdd before performing the hpb step
-    if (doDebug) print("Lambda")
+    print("Lambda")
     lambda.rdd <- map(documents.rdd, function(x) {c(x$dn, x$l)})
     lambda <- reduce(lambda.rdd, rbind)
     unpersist(old.documents.rdd)
@@ -144,7 +144,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     lambda <- lambda[,-1]
     if(doDebug) print(str(lambda))
 
-
+    print("hpb")
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
       A = settings$dim$A,
@@ -164,7 +164,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     }
 
     
-    if (doDebug) print("Mapping beta.")
+    print("beta.")
 #    doDebug <- TRUE
     if (is.null(beta$kappa)) {
       beta.ss <- estep.output$b / rowSums(estep.output$b)
@@ -185,7 +185,7 @@ stm.control <- function(documents, vocab, settings, model, spark.context, spark.
     }
 
 #    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
-    
+    print("mu, etc.")
     if (doDebug) print("Opt mu")
     mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                              covar=settings$covariates$X, settings$gamma$enet)
