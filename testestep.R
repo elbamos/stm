@@ -14,10 +14,14 @@ source("./R/STMreport.R")
 
 library(SparkR)
 
+Sys.setenv(SPARK_MEM="10g")
+
 spark.env <- list(spark.executor.memory="28g", 
 #                  spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+driver.memory="28g",
+driver.maxResultSize='28g',
                   spark.driver.memory="28g", 
                   spark.driver.maxResultSize = "28g"
 #                  spark.cores.max = 1#,
@@ -48,54 +52,54 @@ doDebug <- FALSE
 #                K = 10, spark.context = spark.context, 
 #                spark.partitions = 2
 # )
-data(poliblog5k)
-documents <- poliblog5k.docs
-vocab <- poliblog5k.voc
-meta <- poliblog5k.meta
-poliresults <- stm(documents = documents,
-                   vocab = vocab,
-                   data = meta, 
-                   max.em.its = 200, 
-                    content = ~rating,
-                    prevalence = ~ s(day) + blog,
-                   K = 50, spark.context = spark.context, 
-                   init = "Spectral",
-                   spark.partitions = 38
-)
-# save(poliresuls, file="poliresults")
-# 
-# # load("term_document_matrix")
-# # load("x_nospam")
-# # library(dplyr)
-# # library(tm)
-# # library(slam)
-# # dtm <- as.DocumentTermMatrix(term_document_matrix)
-# # out <- readCorpus(dtm, type = "slam")
-# # names <- count(x, screenName)
-# # thresh <- 60
-# # names <- names[names$n > thresh,]$screenName
-# # x %<>% mutate(tag = factor(ifelse(is.na(tag), "unknown", as.character(tag))),
-# #               screenName = factor(ifelse(screenName %in% names, screenName, "inactive")),
-# #               created_numeric = as.numeric(created)
-# # ) %>% select(id, tag, screenName, created_numeric)
-# # out2 <- prepDocuments(out$documents,
-# #                       out$vocab,
-# #                       meta =  x[x$id %in% names(out$documents),],
-# #                       lower.thresh = 4,
-# #                       upper.thresh = length(out$documents) / 2, verbose = TRUE)
-# # rm(term_document_matrix)
-# # rm(x)
-# # rm(out)
-# # bigtest <- stm(documents = out2$documents,
-# #                    vocab = out2$vocab,
-# #                    data = out2$meta, 
-# #                    max.em.its = 200, 
-# #                    content = ~tag,
-# #                    prevalence = ~ s(created_numeric) + screenName,
-# # #                   control = list(cpp = TRUE), 
-# #                    init.type = "Spectral",
-# #                    K = 200, spark.context = spark.context, 
-# #                    spark.partitions = 15
-# # )
+# data(poliblog5k)
+# documents <- poliblog5k.docs
+# vocab <- poliblog5k.voc
+# meta <- poliblog5k.meta
+# poliresults <- stm(documents = documents,
+#                    vocab = vocab,
+#                    data = meta, 
+#                    max.em.its = 200, 
+#                     content = ~rating,
+#                     prevalence = ~ s(day) + blog,
+#                    K = 50, #spark.context = spark.context, 
+#                    init = "Spectral",
+#              #      spark.partitions = 38
+# )
+# # save(poliresuls, file="poliresults")
 # # 
-# # #sparkR.stop()
+load("term_document_matrix")
+load("x_nospam")
+library(dplyr)
+library(tm)
+library(slam)
+dtm <- as.DocumentTermMatrix(term_document_matrix)
+out <- readCorpus(dtm, type = "slam")
+names <- count(x, screenName)
+thresh <- 60
+names <- names[names$n > thresh,]$screenName
+x %<>% mutate(tag = factor(ifelse(is.na(tag), "unknown", as.character(tag))),
+              screenName = factor(ifelse(screenName %in% names, screenName, "inactive")),
+              created_numeric = as.numeric(created)
+) %>% select(id, tag, screenName, created_numeric)
+out2 <- prepDocuments(out$documents,
+                      out$vocab,
+                      meta =  x[x$id %in% names(out$documents),],
+                      lower.thresh = 4,
+                      upper.thresh = length(out$documents) / 2, verbose = TRUE)
+rm(term_document_matrix)
+rm(x)
+rm(out)
+bigtest <- stm(documents = out2$documents,
+                   vocab = out2$vocab,
+                   data = out2$meta, 
+                   max.em.its = 200, 
+                   content = ~tag,
+                   prevalence = ~ s(created_numeric) + screenName,
+#                   control = list(cpp = TRUE), 
+                   init.type = "Spectral",
+                   K = 200, spark.context = spark.context, 
+                   spark.partitions = 15
+)
+
+#sparkR.stop()
