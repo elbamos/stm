@@ -1,9 +1,10 @@
+library(plyr)
 library(dplyr)
 library(tm)
 library(slam)
 
 library(lda)
-library(plyr)
+
 #library(pryr)
 library(Matrix)
 library(matrixStats)
@@ -77,7 +78,7 @@ load("term_document_matrix")
 load("x_nospam")
 dtm <- as.DocumentTermMatrix(term_document_matrix)
 out <- readCorpus(dtm, type = "slam")
-names <- count(x, screenName)
+names <- dplyr:::count(x, screenName)
 thresh <- 60
 names <- names[names$n > thresh,]$screenName
 x %<>% mutate(tag = factor(ifelse(is.na(tag), "unknown", as.character(tag))),
