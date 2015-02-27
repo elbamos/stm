@@ -13,7 +13,6 @@ stm.control.spark <- function(documents, vocab, settings, model, spark.context, 
   if(is.null(model)) {
     if(verbose) cat("Beginning Initialization.\n")
     #initialize
-    print("here I am")
     model <- stm:::stm.init(documents, settings)
     #unpack
     mu <- list(mu=model$mu)
@@ -129,8 +128,9 @@ stm.control.spark <- function(documents, vocab, settings, model, spark.context, 
     # again when we update lambda
     persist(documents.rdd, "MEMORY_AND_DISK")
     # This is here to force execution and cacheing of documents.rdd with updated lambda  
- #   toss <- count(documents.rdd)
+    toss <- count(documents.rdd)
     unpersist(old.documents.rdd)
+    if (verbose) print("E-Step Phase 2")
     
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
@@ -145,7 +145,7 @@ stm.control.spark <- function(documents, vocab, settings, model, spark.context, 
       spark.partitions = spark.partitions,
       verbose) 
 
-    print(str(estep.output))
+#    print(str(estep.output))
     
     if(verbose) {
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))

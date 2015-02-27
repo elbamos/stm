@@ -39,19 +39,19 @@ doDebug <- FALSE
 # 
 data(gadarian)
 gadarian <- gadarian[1:25,]
-# 
-# corpus <- textProcessor(gadarian$open.ended.response)
-# prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
-# results <- stm(documents = prep$documents,
-#                vocab = prep$vocab,
-# #               data = prep$meta, 
-#                max.em.its = 200, 
-# #                content = ~treatment,
-# #                prevalence = ~ pid_rep + MetaID,
-#                init.type= "Spectral", control = list(nits=50, burnin=25, alpha=(50/20), eta=.01),
-#                K = 20#, spark.context = spark.context, 
-#             #   spark.partitions = 2
-# )
+
+corpus <- textProcessor(gadarian$open.ended.response)
+prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
+results <- stm(documents = prep$documents,
+               vocab = prep$vocab,
+#               data = prep$meta, 
+               max.em.its = 200, 
+#                content = ~treatment,
+#                prevalence = ~ pid_rep + MetaID,
+               init.type= "Spectral", control = list(nits=50, burnin=25, alpha=(50/20), eta=.01),
+               K = 20#, spark.context = spark.context, 
+            #   spark.partitions = 2
+)
 data(poliblog5k)
 documents <- poliblog5k.docs
 vocab <- poliblog5k.voc
