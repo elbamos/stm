@@ -62,7 +62,7 @@ estep.hpb <- function(
   spark.context,
   spark.partitions,
   verbose) {
-
+  
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
   part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split, part) {
@@ -89,20 +89,40 @@ estep.hpb <- function(
       
       #Solve for Hessian/Phi/Bound returning the result
       doc.results <- stm:::hpb(document$l, doc.ct=document$d[2,], mu=mu.i,
-          siginv=siginv, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
-          sigmaentropy=sigmaentropy)
+                               siginv=siginv, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
+                               sigmaentropy=sigmaentropy)
       
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
       lambda <<- rbind(lambda, c(document$dn, document$l))
       c(document$dn, doc.results$bound)
     })
-    list(split, list(s = sigma.ss, 
-                   b = beta.ss, 
-                   bd = bound,
-                   l = lambda
-                   ))
+    index <- as.integer(split/sqrt(spark.partitions))
+    list(index, list(s = sigma.ss, 
+                     b = beta.ss, 
+                     bd = bound,
+                     l = lambda
+    ))
   })
+  # try to combine using an intermediate step
+  part.rdd <- reduceByKey(part.rdd, function(x, y) {
+    if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
+    if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
+    if (length(x) == 4 && length(y) == 4) {
+      list(bd = rbind(x$bd, y$bd), 
+           s = x$s + y$s, 
+           b = merge.beta(x$b, y$b), 
+           l = rbind(x$l, y$l)
+      )
+    } else { 
+      error(paste("bad reduction match",
+                  str(x),
+                  str(y))
+      )
+    }
+  }, 
+  numPartitions = as.integer(sqrt(spark.partitions))
+  )
   # merge the sufficient stats generated for each partition
   out <- reduce(part.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
@@ -115,8 +135,8 @@ estep.hpb <- function(
       )
     } else { 
       error(paste("bad reduction match",
-      str(x),
-      str(y))
+                  str(x),
+                  str(y))
       )
     }
   })
@@ -133,12 +153,12 @@ merge.beta <- function(x, y) {
 }
 
 distribute.beta <- function(beta, spark.context, spark.partitions) {
-   broadcast(sc = spark.context, beta)
+  broadcast(sc = spark.context, beta)
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions) {
-    mu <- mu$mu
-    broadcast(spark.context, mu)#)
+  mu <- mu$mu
+  broadcast(spark.context, mu)#)
 }
 
 mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
@@ -185,7 +205,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   })
   counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
   rm(counts.list)
-
+  
   #########
   #Distributed Poissons
   #########
@@ -202,7 +222,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   }
   
   verbose <- settings$verbose
-
+  
   mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
     # each part should be a column from counts, representing a single vocabulary term
     offset.in <- value(offset.broadcast)
@@ -215,7 +235,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
       } else {
         offset2 <- a.count$m.i + offset.in
       }
-
+      
       mod <- NULL
       while(is.null(mod)) {
         mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
@@ -226,20 +246,20 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
                                maxit=maxit, thresh=thresh),
                         warning=function(w) return(NULL),
                         error=function(e) stop(e))
-      #if it didn't converge, increase nlambda paths by 20% 
-      if(is.null(mod)) nlambda <- nlambda + floor(.2*nlambda)
-    }
-    dev <- (1-mod$dev.ratio)*mod$nulldev
-    ic <- dev + ic.k*mod$df
-    lambda <- which.min(ic)
-    coef <- subM(mod$beta,lambda) #return coefficients
-    if(is.null(a.count$m.i)) coef <- c(mod$a0[lambda], coef)
-    c(i, coef)
-  } )
-  list(value = out)
+        #if it didn't converge, increase nlambda paths by 20% 
+        if(is.null(mod)) nlambda <- nlambda + floor(.2*nlambda)
+      }
+      dev <- (1-mod$dev.ratio)*mod$nulldev
+      ic <- dev + ic.k*mod$df
+      lambda <- which.min(ic)
+      coef <- subM(mod$beta,lambda) #return coefficients
+      if(is.null(a.count$m.i)) coef <- c(mod$a0[lambda], coef)
+      c(i, coef)
+    } )
+    list(value = out)
   }
   )
-
+  
   coef <- reduce(mnreg.rdd, function(x,y)  {   
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
@@ -248,34 +268,34 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   coef <- t(coef)
   coef <- coef[,order(coef[1,])]
   coef <- coef[-1,]
-
+  
   if(!fixedintercept) {
     #if we estimated the intercept add it in
     m <- coef[1,] 
     coef <- coef[-1,]
   }
-
+  
   kappa <- split(coef, row(coef)) 
   ##
   #predictions 
   ##
   #linear predictor
   covar <- settings$covar
-
- linpred <- as.matrix(covar%*%coef) 
- 
- linpred <- sweep(linpred, 2, STATS=m, FUN="+")
- #softmax
- explinpred <- exp(linpred)
- 
- beta <- explinpred/rowSums(explinpred)
- 
- beta <- split(beta, rep(1:A, each=K))
- 
- #wrangle into the list structure
- beta <- lapply(beta, matrix, nrow=K)
- beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
- 
- kappa <- list(m=m, params=kappa)
- list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
+  
+  linpred <- as.matrix(covar%*%coef) 
+  
+  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
+  #softmax
+  explinpred <- exp(linpred)
+  
+  beta <- explinpred/rowSums(explinpred)
+  
+  beta <- split(beta, rep(1:A, each=K))
+  
+  #wrangle into the list structure
+  beta <- lapply(beta, matrix, nrow=K)
+  beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
+  
+  kappa <- list(m=m, params=kappa)
+  list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
 }

@@ -15,21 +15,21 @@ source("./R/stm.R")
 source("./R/stm.control.R")
 source("./R/STMconvergence.R")
 source("./R/STMreport.R")
-#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=c3.4xlarge --spot-price=0.4 --region=us-east-1 --zone=us-east-1e -s 5 -a ami-0a613c62 launch vanillaspark
+#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=r3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 5 -a ami-0a613c62 launch vanillaspark
 
 
 library(SparkR)
 
-Sys.setenv(SPARK_MEM="10g")
-
-spark.env <- list(spark.executor.memory="28g", 
-#                  spark.storage.memoryFraction = "0.2",
+# Sys.setenv(SPARK_MEM="10g")
+# 
+spark.env <- list(spark.executor.memory="6g", 
+                  spark.storage.memoryFraction = "0.2",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
 driver.memory="28g",
 driver.maxResultSize='28g',
-                  spark.driver.memory="28g", 
-                  spark.driver.maxResultSize = "28g"
+                  spark.driver.memory="6g", 
+                  spark.driver.maxResultSize = "6g"
 #                  spark.cores.max = 1#,
 #                 ,spark.rdd.compress="true"
 )
@@ -40,11 +40,11 @@ spark.context <- sparkR.init(master=master,
                              appName = paste0("poli", Sys.time()),
                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 doDebug <- FALSE
-# # spark.context = sparkR.init("local")
-# # 
-# # 
+# spark.context = sparkR.init("local")
+# 
+# 
 # data(gadarian)
-# #gadarian <- gadarian[1:25,]
+# gadarian <- gadarian[1:100,]
 # 
 # corpus <- textProcessor(gadarian$open.ended.response)
 # prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
@@ -55,8 +55,8 @@ doDebug <- FALSE
 #                 content = ~treatment,
 #                 prevalence = ~ pid_rep + MetaID,
 #                init.type= "Spectral", #control = list(nits=50, burnin=25, alpha=(50/20), eta=.01),
-#                K = 20#, spark.context = spark.context, 
-#               # spark.partitions = 20
+#                K = 20, spark.context = spark.context, 
+#                spark.partitions = 4
 # )
 # data(poliblog5k)
 # documents <- poliblog5k.docs
