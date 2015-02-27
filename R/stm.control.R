@@ -128,11 +128,8 @@ stm.control.spark <- function(documents, vocab, settings, model, spark.context, 
     # persist this because we'll use it twice - once for the hpb step, and 
     # again when we update lambda
     persist(documents.rdd, "OFF_HEAP")
-    # This is here to force execution and cacheing of documents.rdd with updated lambda  
-#    toss <- count(documents.rdd)
-    unpersist(old.documents.rdd)
+
     if (verbose) print("E-Step Phase 2")
-    
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,
       A = settings$dim$A,
@@ -145,7 +142,8 @@ stm.control.spark <- function(documents, vocab, settings, model, spark.context, 
       spark.context = spark.context,
       spark.partitions = spark.partitions,
       verbose) 
-
+    if (doDebug) print("unpersist old rdd")
+    unpersist(old.documents.rdd)
 #    print(str(estep.output))
     
     if(verbose) {

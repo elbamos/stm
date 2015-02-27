@@ -105,24 +105,26 @@ estep.hpb <- function(
     ))
   })
   # try to combine using an intermediate step
-  part.rdd <- reduceByKey(part.rdd, function(x, y) {
-    if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
-    if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
-    if (length(x) == 4 && length(y) == 4) {
-      list(bd = rbind(x$bd, y$bd), 
-           s = x$s + y$s, 
-           b = merge.beta(x$b, y$b), 
-           l = rbind(x$l, y$l)
-      )
-    } else { 
-      error(paste("bad reduction match",
-                  str(x),
-                  str(y))
-      )
-    }
-  }, 
-  numPartitions = as.integer(sqrt(spark.partitions))
-  )
+  if (FALSE) { # turn this on when we understand it better
+    part.rdd <- reduceByKey(part.rdd, function(x, y) {
+      if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
+      if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
+      if (length(x) == 4 && length(y) == 4) {
+        list(bd = rbind(x$bd, y$bd), 
+             s = x$s + y$s, 
+             b = merge.beta(x$b, y$b), 
+             l = rbind(x$l, y$l)
+        )
+      } else { 
+        error(paste("bad reduction match",
+                    str(x),
+                    str(y))
+        )
+      }
+    }, 
+    numPartitions = as.integer(sqrt(spark.partitions))
+    )
+  }
   # merge the sufficient stats generated for each partition
   out <- reduce(part.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
