@@ -221,6 +221,9 @@ stm <- function(documents, vocab, K,
   ###
   # Finally run the actual model
   ###
-  spark.partitions <- as.integer(spark.partitions)
-  return(stm.control(documents, vocab, settings,model, spark.context, spark.partitions))
+  if (is.null(spark.context)) {
+    return(stm.control(documents, vocab, settings,model))
+  } else {
+    return(stm.control.spark(documents, vocab, settings,model, spark.context = spark.context, spark.partitions = spark.partitions))   
+  }
 }
