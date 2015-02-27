@@ -46,7 +46,7 @@ stm.control.spark <- function(documents, vocab, settings, model, spark.context, 
   
   if (doDebug || verbose) print("Distributing globals.")
   # sensible default partitioning
-  if (is.null(spark.partitions)) spark.partitions <- as.integer(2 * round(log(settings$dim$N * settings$dim$K * settings$dim$A)))
+  if (is.null(spark.partitions)) spark.partitions <- as.integer(4 * round(log(settings$dim$N * settings$dim$K * settings$dim$A)))
   includePackage(spark.context, "glmnet")
   includePackage(spark.context,"Matrix")
   includePackage(spark.context, "plyr")
