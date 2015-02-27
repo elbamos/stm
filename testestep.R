@@ -22,14 +22,14 @@ library(SparkR)
 
 # Sys.setenv(SPARK_MEM="10g")
 # 
-spark.env <- list(spark.executor.memory="6g", 
-                  spark.storage.memoryFraction = "0.2",
+spark.env <- list(spark.executor.memory="13g", 
+                  spark.storage.memoryFraction = "0",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
 driver.memory="28g",
 driver.maxResultSize='28g',
-                  spark.driver.memory="6g", 
-                  spark.driver.maxResultSize = "6g"
+                  spark.driver.memory="10g", 
+                  spark.driver.maxResultSize = "10g"
 #                  spark.cores.max = 1#,
 #                 ,spark.rdd.compress="true"
 )
