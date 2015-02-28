@@ -163,6 +163,7 @@ estep.hpb <- function(
     print("collected")
   }
   # merge the sufficient stats generated for each partition
+  print("final reduction")
   out <- reduce(part.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
