@@ -20,8 +20,8 @@ source("./R/STMreport.R")
 
 library(SparkR)
 
-# Sys.setenv(SPARK_MEM="10g")
-# 
+ Sys.setenv(SPARK_MEM="10g")
+
 spark.env <- list(spark.executor.memory="13g", 
                   spark.storage.memoryFraction = "0.1",
                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
@@ -39,7 +39,7 @@ master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 spark.context <- sparkR.init(master=master,
                              appName = paste0("poli", Sys.time()),
                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
-doDebug <- FALSE
+doDebug <- TRUE
 # spark.context = sparkR.init("local")
 # 
 # 
@@ -70,7 +70,8 @@ doDebug <- FALSE
 #                     prevalence = ~ s(day) + blog,
 #                    K = 100, spark.context = spark.context, 
 #                    init = "Spectral",
-#                    spark.partitions = 256
+#                    spark.partitions = 256, 
+#                    spark.persistence = "DISK_ONLY"
 # )
 # # # save(poliresuls, file="poliresults")
 # # # 

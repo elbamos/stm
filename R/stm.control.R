@@ -2,7 +2,9 @@
 #compared to the original we have more initializations, 
 # more explicit options, trimmed fat, memoization
 
-stm.control.spark <- function(documents, vocab, settings, model, spark.context, spark.partitions = NULL) {
+stm.control.spark <- function(documents, vocab, settings, model, 
+                              spark.context, spark.partitions, 
+                              spark.persistence) {
   
   globaltime <- proc.time()
   verbose <- settings$verbose
@@ -127,7 +129,7 @@ stm.control.spark <- function(documents, vocab, settings, model, spark.context, 
       verbose) 
     # persist this because we'll use it twice - once for the hpb step, and 
     # again when we update lambda
-    persist(documents.rdd, "OFF_HEAP")
+    persist(documents.rdd, spark.persistence)
 
     if (verbose) print("E-Step Phase 2")
     estep.output <- estep.hpb(

@@ -11,7 +11,7 @@ stm <- function(documents, vocab, K,
                 gamma.prior=c("Pooled", "L1"), sigma.prior=0,
                 kappa.prior=c("L1", "Jeffreys"), control=list(),
                 spark.context = NULL,
-                spark.partitions = NULL)  {
+                spark.partitions = NULL, spark.persistence = "MEMORY_AND_DISK")  {
   
   #Match Arguments and save the call
   init.type <- match.arg(init.type)
@@ -224,6 +224,8 @@ stm <- function(documents, vocab, K,
   if (is.null(spark.context)) {
     return(stm.control(documents, vocab, settings,model))
   } else {
-    return(stm.control.spark(documents, vocab, settings,model, spark.context = spark.context, spark.partitions = spark.partitions))   
+    return(stm.control.spark(documents, vocab, settings,model, 
+                             spark.context = spark.context, spark.partitions = spark.partitions,
+                             spark.persistence = spark.persistence))   
   }
 }
