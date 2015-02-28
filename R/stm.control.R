@@ -130,7 +130,10 @@ stm.control.spark <- function(documents, vocab, settings, model,
     # persist this because we'll use it twice - once for the hpb step, and 
     # again when we update lambda
     persist(documents.rdd, spark.persistence)
-
+    if ("COUNT" %in% reduction) {
+      toss <- count(documents.rdd)
+      unpersist(old.documents.rdd)
+    }
     if (verbose) print("E-Step Phase 2")
     estep.output <- estep.hpb(
       documents.rdd = documents.rdd,

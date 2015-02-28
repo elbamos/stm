@@ -17,10 +17,12 @@ source("./R/STMconvergence.R")
 source("./R/STMreport.R")
 #/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=r3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 5 -a ami-0a613c62 launch vanillaspark
 
-
 library(SparkR)
 
- Sys.setenv(SPARK_MEM="10g")
+doDebug <- TRUE
+reduction <- c("COLLECT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT"
+# COMBINE may work -- failure at the reduce stage, but the same failure as before
+Sys.setenv(SPARK_MEM="10g")
 
 spark.env <- list(spark.executor.memory="13g", 
                   spark.storage.memoryFraction = "0.1",
@@ -39,42 +41,46 @@ master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 spark.context <- sparkR.init(master=master,
                              appName = paste0("poli", Sys.time()),
                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
-doDebug <- TRUE
+
 # spark.context = sparkR.init("local")
 # 
-# 
-# data(gadarian)
-# gadarian <- gadarian[1:100,]
-# 
-# corpus <- textProcessor(gadarian$open.ended.response)
-# prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
-# results <- stm(documents = prep$documents,
-#                vocab = prep$vocab,
-#                data = prep$meta, 
-#                max.em.its = 200, 
-#                 content = ~treatment,
-#                 prevalence = ~ pid_rep + MetaID,
-#                init.type= "Spectral", #control = list(nits=50, burnin=25, alpha=(50/20), eta=.01),
-#                K = 20, spark.context = spark.context, 
-#                spark.partitions = 4
-# )
-# data(poliblog5k)
-# documents <- poliblog5k.docs
-# vocab <- poliblog5k.voc
-# meta <- poliblog5k.meta
-# poliresults <- stm(documents = documents,
-#                    vocab = vocab,
-#                    data = meta, 
-#                    max.em.its = 200, 
-#                     content = ~rating,
-#                     prevalence = ~ s(day) + blog,
-#                    K = 100, spark.context = spark.context, 
-#                    init = "Spectral",
-#                    spark.partitions = 256, 
-#                    spark.persistence = "DISK_ONLY"
-# )
-# # # save(poliresuls, file="poliresults")
-# # # 
+smalltest <- function() {
+data(gadarian)
+gadarian <- gadarian[1:100,]
+
+corpus <- textProcessor(gadarian$open.ended.response)
+prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
+results <- stm(documents = prep$documents,
+               vocab = prep$vocab,
+               data = prep$meta, 
+               max.em.its = 200, 
+                content = ~treatment,
+                prevalence = ~ pid_rep + MetaID,
+               init.type= "Spectral", #control = list(nits=50, burnin=25, alpha=(50/20), eta=.01),
+               K = 20, spark.context = spark.context, 
+               spark.partitions = 4
+)
+}
+mediumtest <- function() {
+data(poliblog5k)
+documents <- poliblog5k.docs
+vocab <- poliblog5k.voc
+meta <- poliblog5k.meta
+poliresults <- stm(documents = documents,
+                   vocab = vocab,
+                   data = meta, 
+                   max.em.its = 200, 
+                    content = ~rating,
+                    prevalence = ~ s(day) + blog,
+                   K = 100, spark.context = spark.context, 
+                   init = "Spectral",
+                   spark.partitions = 256, 
+                   spark.persistence = "DISK_ONLY"
+)
+# # save(poliresuls, file="poliresults")
+# # 
+}
+bigtest <- function() {
 load("term_document_matrix")
 load("x_nospam")
 dtm <- as.DocumentTermMatrix(term_document_matrix)
@@ -106,5 +112,6 @@ bigtest <- stm(documents = out2$documents,
                    spark.context = spark.context, 
                    spark.partitions = 18
 )
-
+}
 # #sparkR.stop()
+bigtest()
