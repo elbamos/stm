@@ -1,5 +1,5 @@
 doDebug <- FALSE
-
+reduction <- "NONE"
 # processes documents.rdd, running logisticnormal and 
 # producing a new documents.rdd with an updated lambda
 estep.lambda <- function( 
@@ -105,7 +105,8 @@ estep.hpb <- function(
     ))
   })
   # try to combine using an intermediate step
-  if (FALSE) { # turn this on when we understand it better
+  if ("KEY" %in% reduction) { # turn this on when we understand it better
+    print("reduce by key")
     part.rdd <- reduceByKey(part.rdd, function(x, y) {
       if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
       if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
@@ -124,6 +125,42 @@ estep.hpb <- function(
     }, 
     numPartitions = as.integer(sqrt(spark.partitions))
     )
+    print("Done reducing by key")
+  }
+  if ("COMBINE" %in% reduction) {
+      print("combining")
+      part.rdd <- combineByKey(part.rdd, createCombiner = function(v) {v}, 
+                                function(C, v) {
+        list(bd = rbind(C$bd, v$bd), 
+             s = C$s + v$s, 
+             b = merge.beta(C$b, v$b), 
+             l = rbind(C$l, v$l)
+        )
+    },
+    function(C1, C2) {
+      list(bd = rbind(C1$bd, C2$bd), 
+           s = C1$s + C2$s, 
+           b = merge.beta(C1$b, C2$b), 
+           l = rbind(C1$l, C2$l)
+      )
+    },
+    numPartitions = as.integer(sqrt(spark.partitions))
+    )
+      print("done combining")
+  }
+  if ("COLLECT" %in% reduction) {
+    print("Collecting")
+    toss <- collect(part.rdd)
+    print("Done collecting")
+  }
+  if ("COLLECTPARTITION" %in% reduction) {
+    print("collecting partitions - counting")
+    j <- numPartitions(part.rdd)
+    for (i in 1:j) {
+      print(i)
+      toss <- collectPartition(part.rdd, as.integer(i))
+    }
+    print("collected")
   }
   # merge the sufficient stats generated for each partition
   out <- reduce(part.rdd, function(x, y) {
