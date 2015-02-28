@@ -1,5 +1,5 @@
 doDebug <- FALSE
-reduction <- "NONE"
+#reduction <- "NONE"
 # processes documents.rdd, running logisticnormal and 
 # producing a new documents.rdd with an updated lambda
 estep.lambda <- function( 
@@ -66,6 +66,7 @@ estep.hpb <- function(
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
   part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split, part) {
+    print("started a partition")
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
@@ -98,6 +99,7 @@ estep.hpb <- function(
       c(document$dn, doc.results$bound)
     })
     index <- as.integer(split/sqrt(spark.partitions))
+    print("finished a partition")
     list(index, list(s = sigma.ss, 
                      b = beta.ss, 
                      bd = bound,
@@ -108,16 +110,20 @@ estep.hpb <- function(
   if ("KEY" %in% reduction) { # turn this on when we understand it better
     print("reduce by key")
     part.rdd <- reduceByKey(part.rdd, function(x, y) {
-      if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
+      if ((is.null(x) || is.integer(x) || is.atomic(x)) && !is.null(y)) return(y)
+      if ((is.null(y) || is.integer(y) || is.atomic(y)) && !is.null(x)) return(x)
+      if (length(x) == 2) x <- x[[2]]
+      if (length(y) == 2) y <- y[[2]]
       if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
       if (length(x) == 4 && length(y) == 4) {
+        list(0L,
         list(bd = rbind(x$bd, y$bd), 
              s = x$s + y$s, 
              b = merge.beta(x$b, y$b), 
              l = rbind(x$l, y$l)
-        )
+        ))
       } else { 
-        error(paste("bad reduction match",
+        stop(paste("bad key reduction match",
                     str(x),
                     str(y))
         )
@@ -129,15 +135,23 @@ estep.hpb <- function(
   }
   if ("COMBINE" %in% reduction) {
       print("combining")
+      part <- numPartitions(part.rdd)
+      print(paste("partitions before combining ", part))
       part.rdd <- combineByKey(part.rdd, createCombiner = function(v) {v}, 
-                                function(C, v) {
+                                mergeValue = function(C, v) {
+                                  print("merge value")
+                                  print(str(C))
+                                  print(str(v))
         list(bd = rbind(C$bd, v$bd), 
              s = C$s + v$s, 
              b = merge.beta(C$b, v$b), 
              l = rbind(C$l, v$l)
         )
     },
-    function(C1, C2) {
+    mergeCombiners = function(C1, C2) {
+      print("merge combiners")
+      print(str(C1))
+      print(str(C2))
       list(bd = rbind(C1$bd, C2$bd), 
            s = C1$s + C2$s, 
            b = merge.beta(C1$b, C2$b), 
@@ -147,6 +161,28 @@ estep.hpb <- function(
     numPartitions = as.integer(sqrt(spark.partitions))
     )
       print("done combining")
+      part <- numPartitions(part.rdd)
+      print(paste("partitions after combining ", part))
+  }
+  if ("REPARTITION" %in% reduction) {
+    print("repartitioning")
+    part <- numPartitions(part.rdd) 
+    print(paste("before repartitioning ", part))
+    part.rdd <- partitionBy(part.rdd, numPartitions = as.integer(sqrt(part)))
+    print("repartitioned, now collapsing")
+    part.rdd <- mapPartitionsWithIndex(part.rdd, function (split, part) {
+      out <- part[[1]]
+      for (index in 2:length(part)) {
+        current <- part[[index]]
+        out <- list(bd = rbind(out$bd, curent$bd), 
+                    s = out$s + current$s, 
+                    b = merge.beta(out$b, current$b), 
+                    l = rbind(out$l, current$l)
+        )
+      }
+      list(split, out)
+    })
+    print("collapsed")
   }
   if ("COLLECT" %in% reduction) {
     print("Collecting")
@@ -156,7 +192,8 @@ estep.hpb <- function(
   if ("COLLECTPARTITION" %in% reduction) {
     print("collecting partitions - counting")
     j <- numPartitions(part.rdd)
-    for (i in 1:j) {
+    print("counted")
+    for (i in 0:(j-1)) {
       print(i)
       toss <- collectPartition(part.rdd, as.integer(i))
     }

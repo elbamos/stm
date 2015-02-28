@@ -20,8 +20,12 @@ source("./R/STMreport.R")
 library(SparkR)
 
 doDebug <- TRUE
-reduction <- c("COLLECT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT"
-# COMBINE may work -- failure at the reduce stage, but the same failure as before
+reduction <- c("REPARTITION", "COMBINE", "COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
+# COLLECT and
+# COLLECT PARTITIONS
+# COUNT and COLLECT -- works up to medium size
+# COLLECT ALONE -- !!! COMPLETES THE COLLECTION PHASE, FAILS AS REDUCTION (memory & disk) - but super slow
+
 Sys.setenv(SPARK_MEM="10g")
 
 spark.env <- list(spark.executor.memory="13g", 
@@ -43,7 +47,7 @@ spark.context <- sparkR.init(master=master,
                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 
 # spark.context = sparkR.init("local")
-# 
+
 smalltest <- function() {
 data(gadarian)
 gadarian <- gadarian[1:100,]
@@ -53,7 +57,7 @@ prep <- prepDocuments(corpus$documents, corpus$vocab, gadarian)
 results <- stm(documents = prep$documents,
                vocab = prep$vocab,
                data = prep$meta, 
-               max.em.its = 200, 
+               max.em.its = 3, 
                 content = ~treatment,
                 prevalence = ~ pid_rep + MetaID,
                init.type= "Spectral", #control = list(nits=50, burnin=25, alpha=(50/20), eta=.01),
@@ -69,7 +73,7 @@ meta <- poliblog5k.meta
 poliresults <- stm(documents = documents,
                    vocab = vocab,
                    data = meta, 
-                   max.em.its = 200, 
+                   max.em.its = 3, 
                     content = ~rating,
                     prevalence = ~ s(day) + blog,
                    K = 100, spark.context = spark.context, 
@@ -103,14 +107,14 @@ rm(out)
 bigtest <- stm(documents = out2$documents,
                    vocab = out2$vocab,
                    data = out2$meta, 
-                   max.em.its = 200, 
+                   max.em.its = 3, 
                    content = ~tag,
                    prevalence = ~screenName,
 #                  control = list(cpp = TRUE), 
                    init.type = "Spectral",
                    K = 200, 
                    spark.context = spark.context, 
-                   spark.partitions = 18
+                   spark.partitions = 10
 )
 }
 # #sparkR.stop()
