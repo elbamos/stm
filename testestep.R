@@ -15,16 +15,21 @@ source("./R/stm.R")
 source("./R/stm.control.R")
 source("./R/STMconvergence.R")
 source("./R/STMreport.R")
+
 #/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=r3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 5 -a ami-0a613c62 launch vanillaspark
 
 library(SparkR)
 
 doDebug <- TRUE
-reduction <- c("REPARTITION", "COMBINE", "COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
+reduction <- c("KEY", "COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
 # COLLECT PARTITIONS
 # COUNT and COLLECT -- works up to medium size
 # COLLECT ALONE -- !!! COMPLETES THE COLLECTION PHASE, FAILS AS REDUCTION (memory & disk) - but super slow
+# REPARTITION -- appears to work, at least through one iteration
+# COMBINE -- does successfully shrink partitions, effect on RAM not clear.  desiralization error with large data?
+# KEY -- the best hope.  Function is programmatically correct. WORKS - 
+#       BUT RUNS OUT OF MEMORY AT START OF 3rd ITERATION WHILE SERIALIZING THE CLOSURE.  NOTE THAT THIS WAS WITH COUNT
 
 Sys.setenv(SPARK_MEM="10g")
 
@@ -42,11 +47,11 @@ driver.maxResultSize='28g',
 
 master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 
-spark.context <- sparkR.init(master=master,
-                             appName = paste0("poli", Sys.time()),
-                             sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
+# spark.context <- sparkR.init(master=master,
+#                              appName = paste0("poli", Sys.time()),
+#                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 
-# spark.context = sparkR.init("local")
+spark.context = sparkR.init("local")
 
 smalltest <- function() {
 data(gadarian)
@@ -118,4 +123,5 @@ bigtest <- stm(documents = out2$documents,
 )
 }
 # #sparkR.stop()
+#mediumtest()
 bigtest()
