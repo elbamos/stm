@@ -51,10 +51,10 @@ stm.control.spark <- function(documents, vocab, settings, model,
   if (is.null(spark.partitions)) spark.partitions <- as.integer(4 * round(log(settings$dim$N * settings$dim$K * settings$dim$A)))
   includePackage(spark.context, "glmnet")
   includePackage(spark.context,"Matrix")
-  includePackage(spark.context, "plyr")
+#  includePackage(spark.context, "plyr")
 
   index <- 0
-  doclist <- llply(documents, .fun = function(x) {
+  doclist <- lapply(documents, FUN = function(x) {
     index <<- index + 1
     list( 
       dn = index,
@@ -149,6 +149,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
       verbose) 
     if (doDebug) print("unpersist old rdd")
     unpersist(old.documents.rdd)
+    print(str(estep.output))
 #    print(str(estep.output))
     
     if(verbose) {

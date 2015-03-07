@@ -11,42 +11,50 @@ estep.lambda <- function(
   spark.partitions,
   verbose) {
   
-  mapPartitionsWithIndex(documents.rdd, function(split, part) {   
-    mu <- value(mu.distributed)
+  mapPartitionsWithIndex(documents.rdd, function(split, part) {
+ 
+    mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
-    siginv <- value(siginv.broadcast)
-    llply(.data = part, .fun = function(listElement) {
-      document <- listElement
+    siginv.in <- value(siginv.broadcast)
+
+    lapply(part, function(document) {
       init <- document$l
       if (is.null(document$nd)) {
         document$nd <- sum(document$d[2,])
       }
       beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
-      if (ncol(mu) > 1) {
-        mu.i <- mu[,document$dn]
+      if (ncol(mu.in) > 1) {
+        mu.i <- mu.in[,document$dn]
       } else {
-        mu.i <- as.numeric(mu)
+        mu.i <- as.numeric(mu.in)
       }
-      
-      document$l <- logisticnormal.lambda(eta = init, 
-                                          mu = mu.i, 
-                                          siginv = siginv,
-                                          beta = beta.i.lambda, 
-                                          doc.ct = document$d[2,], 
-                                          Ndoc = document$nd
-      )
+      document$l <- optim(par=init, fn=lhood, gr=grad,
+                         method="BFGS", control=list(maxit=500),
+                         doc.ct=document$d[2,], mu=mu.i,
+                         siginv=siginv.in, beta=beta.i.lambda, Ndoc = document$nd)$par
       document
     }
     )
   })
 }
 
-logisticnormal.lambda <- function(eta, mu, siginv, beta, doc.ct, Ndoc) {
-  optim.out <- optim(par=eta, fn=stm:::lhood, gr=stm:::grad,
-                     method="BFGS", control=list(maxit=500),
-                     doc.ct=doc.ct, mu=mu,
-                     siginv=siginv, beta=beta, Ndoc=Ndoc)
-  optim.out$par
+lhood <- function(eta, doc.ct, mu, siginv,beta, Ndoc) {
+  expeta <- c(exp(eta),1)
+  part1 <- sum(doc.ct*log(.colSums(beta*expeta, nrow(beta), ncol(beta)))) - Ndoc*log(sum(expeta))
+  # -1/2 (eta - mu)^T Sigma (eta - mu)
+  diff <- eta-mu
+  part2 <- .5*sum(diff*(siginv %*% diff))
+  part2 - part1  
+} 
+
+grad <- function(eta, doc.ct, mu, siginv, beta, Ndoc) {
+  expeta.sh <- exp(eta) 
+  expeta <- c(expeta.sh,1)
+  Ez <- expeta*beta
+  denom <- doc.ct/.colSums(Ez, nrow(Ez), ncol(Ez))
+  part1 <- (Ez%*%denom)[-length(expeta)] - expeta.sh*(Ndoc/sum(expeta))  
+  part2 <- siginv%*%(eta-mu) 
+  as.numeric(part2 - part1)
 }
 
 # maps and reduces documents.rdd to collect sufficient stats
@@ -65,8 +73,7 @@ estep.hpb <- function(
   
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
-  part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split, part) {
-    print("started a partition")
+  part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split,part) {
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
@@ -74,54 +81,50 @@ estep.hpb <- function(
     sigma.ss <- diag(0, nrow=(K-1))
     lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
     
-    mu <- value(mu.distributed)
+    mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
-    siginv <- value(siginv.broadcast)
-    sigmaentropy <- value(sigmaentropy.broadcast)
-    
-    bound <- laply(part, .fun = function(document) {
+    siginv.in <- value(siginv.broadcast)
+    sigmaentropy.in <- value(sigmaentropy.broadcast)
+    bound <- sapply(part, function(document) {
       eta <- document$l
       words <- document$d[1,]
-      if (ncol(mu) > 1) {
-        mu.i <- mu[,document$dn]
+      if (ncol(mu.in) > 1) {
+        mu.i <- mu.in[,document$dn]
       } else {
-        mu.i <- as.numeric(mu)
+        mu.i <- as.numeric(mu.in)
       }
       
       #Solve for Hessian/Phi/Bound returning the result
       doc.results <- stm:::hpb(document$l, doc.ct=document$d[2,], mu=mu.i,
-                               siginv=siginv, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
-                               sigmaentropy=sigmaentropy)
+                               siginv=siginv.in, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
+                               sigmaentropy=sigmaentropy.in)
       
-      beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
-      sigma.ss <<- sigma.ss + doc.results$eta$nu
-      lambda <<- rbind(lambda, c(document$dn, document$l))
+      beta.ss[[document$a]][,words] <- doc.results$phis + beta.ss[[document$a]][,words]
+      sigma.ss <- sigma.ss + doc.results$eta$nu
+      lambda <- rbind(lambda, c(document$dn, document$l))
       c(document$dn, doc.results$bound)
     })
     index <- as.integer(split/sqrt(spark.partitions))
-    print("finished a partition")
-    list(index, list(s = sigma.ss, 
+    list(list(key = index, list(
+                s = sigma.ss, 
                      b = beta.ss, 
-                     bd = bound,
+                     bd = t(bound),
                      l = lambda
-    ))
+    )))
   })
+  if (doDebug) {
+    toss <- SparkR::count(part.rdd)
+    print("count")
+  }
   # try to combine using an intermediate step
   if ("KEY" %in% reduction) { # turn this on when we understand it better
-    print("reduce by key")
     part.rdd <- reduceByKey(part.rdd, function(x, y) {
-      if ((is.null(x) || is.integer(x) || is.atomic(x)) && !is.null(y)) return(y)
-      if ((is.null(y) || is.integer(y) || is.atomic(y)) && !is.null(x)) return(x)
-      if (length(x) == 2) x <- x[[2]]
-      if (length(y) == 2) y <- y[[2]]
-      if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
       if (length(x) == 4 && length(y) == 4) {
-        list(0L,
         list(bd = rbind(x$bd, y$bd), 
              s = x$s + y$s, 
              b = merge.beta(x$b, y$b), 
              l = rbind(x$l, y$l)
-        ))
+        )
       } else { 
         stop(paste("bad key reduction match",
                     str(x),
@@ -134,25 +137,23 @@ estep.hpb <- function(
     print("Done reducing by key")
   }
   if ("COMBINE" %in% reduction) {
-      print("combining")
-      part <- numPartitions(part.rdd)
-      print(paste("partitions before combining ", part))
-      part.rdd <- combineByKey(part.rdd, createCombiner = function(v) {v}, 
-                                mergeValue = function(C, v) {
-                                  print("merge value")
-                                  print(str(C))
-                                  print(str(v))
-        list(bd = rbind(C$bd, v$bd), 
-             s = C$s + v$s, 
-             b = merge.beta(C$b, v$b), 
-             l = rbind(C$l, v$l)
-        )
+    print("combining")
+    part <- numPartitions(part.rdd)
+    print(paste("partitions before combining ", part))
+    part.rdd <- combineByKey(part.rdd, createCombiner = function(v) v, 
+                             mergeValue = function(C, v) {
+      print("merge value")
+      list(
+           bd = rbind(C$bd, v$bd), 
+           s = C$s + v$s, 
+           b = merge.beta(C$b, v$b), 
+           l = rbind(C$l, v$l)
+      )
     },
     mergeCombiners = function(C1, C2) {
       print("merge combiners")
-      print(str(C1))
-      print(str(C2))
-      list(bd = rbind(C1$bd, C2$bd), 
+      list(
+           bd = rbind(C1$bd, C2$bd), 
            s = C1$s + C2$s, 
            b = merge.beta(C1$b, C2$b), 
            l = rbind(C1$l, C2$l)
@@ -160,9 +161,9 @@ estep.hpb <- function(
     },
     numPartitions = as.integer(sqrt(spark.partitions))
     )
-      print("done combining")
-      part <- numPartitions(part.rdd)
-      print(paste("partitions after combining ", part))
+    print("done combining")
+    part <- numPartitions(part.rdd)
+    print(paste("partitions after combining ", part))
   }
   if ("REPARTITION" %in% reduction) {
     print("repartitioning")
@@ -171,16 +172,16 @@ estep.hpb <- function(
     part.rdd <- partitionBy(part.rdd, numPartitions = as.integer(sqrt(part)))
     print("repartitioned, now collapsing")
     part.rdd <- mapPartitionsWithIndex(part.rdd, function (split, part) {
-      out <- part[[1]]
+      out <- part[[1]][[2]]
       for (index in 2:length(part)) {
-        current <- part[[index]]
+        current <- part[[index]][[2]]
         out <- list(bd = rbind(out$bd, curent$bd), 
                     s = out$s + current$s, 
                     b = merge.beta(out$b, current$b), 
                     l = rbind(out$l, current$l)
         )
       }
-      list(split, out)
+      list(list(split, out))
     })
     print("collapsed")
   }
@@ -204,6 +205,8 @@ estep.hpb <- function(
   out <- reduce(part.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
+    if (length(x) == 2) x <- x[[2]]
+    if (length(y) == 2) y <- y[[2]]
     if (length(x) == 4 && length(y) == 4) {
       list(bd = rbind(x$bd, y$bd), 
            s = x$s + y$s, 
@@ -211,7 +214,7 @@ estep.hpb <- function(
            l = rbind(x$l, y$l)
       )
     } else { 
-      error(paste("bad reduction match",
+      stop(paste("bad reduction match",
                   str(x),
                   str(y))
       )
@@ -272,7 +275,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   # for very large data sets.
   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
   index <- 0
-  counts.list <- llply(counts, function(x) {
+  counts.list <- lapply(counts, function(x) {
     index <<- index + 1
     list(
       t = index, 
@@ -303,8 +306,8 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
     # each part should be a column from counts, representing a single vocabulary term
     offset.in <- value(offset.broadcast)
-    covar <- value(covar.broadcast)
-    out <- laply(part, .fun = function(a.count) {
+    covar.in <- value(covar.broadcast)
+    map.out <- sapply(part, USE.NAMES=FALSE,simplify=TRUE,function(a.count) {
       i <- a.count$t
       counts.i <- a.count$c.i
       if (is.null(a.count$m.i)) {
@@ -315,7 +318,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
       
       mod <- NULL
       while(is.null(mod)) {
-        mod <- tryCatch(glmnet(x=covar, y=counts.i, family="poisson", 
+        mod <- tryCatch(glmnet(x=covar.in, y=counts.i, family="poisson", 
                                offset=offset2, standardize=FALSE,
                                intercept=is.null(a.count$m.i), 
                                lambda.min.ratio=lambda.min.ratio,
@@ -333,16 +336,16 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
       if(is.null(a.count$m.i)) coef <- c(mod$a0[lambda], coef)
       c(i, coef)
     } )
-    list(value = out)
-  }
-  )
+    list(value = map.out)
+  })
   
+
   coef <- reduce(mnreg.rdd, function(x,y)  {   
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
-    rbind(x, y)
+    cbind(x, y)
   })
-  coef <- t(coef)
+
   coef <- coef[,order(coef[1,])]
   coef <- coef[-1,]
   
@@ -375,4 +378,26 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   
   kappa <- list(m=m, params=kappa)
   list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
+}
+
+envirolist <- function() {
+  environments <- search()
+  print(environments)
+  environments <- environments[!grep("(package|autoloads)", environments)]
+  for (e in environments) {
+    print(e)
+    print(ls(envir = as.environment(e)))
+    for (item in ls(envir = as.environment(e))) {
+      print(item)
+      print(pryr::object_size(item))
+    }
+  }
+  for (l in 1:(sys.nframe()-1)) {
+    e <- ls(envir = parent.frame(l))
+    print(e)
+    for (i in e) {
+      print(i)
+      print(pryr::object_size(i))
+    }
+  }
 }

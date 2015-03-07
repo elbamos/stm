@@ -32,18 +32,19 @@ reduction <- c("KEY", "COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", 
 #       BUT RUNS OUT OF MEMORY AT START OF 3rd ITERATION WHILE SERIALIZING THE CLOSURE.  NOTE THAT THIS WAS WITH COUNT
 
 Sys.setenv(SPARK_MEM="10g")
-
-spark.env <- list(spark.executor.memory="13g", 
-                  spark.storage.memoryFraction = "0.1",
-                  spark.serializer="org.apache.spark.serializer.KryoSerializer",
-                  spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-driver.memory="28g",
-driver.maxResultSize='28g',
-                  spark.driver.memory="10g", 
-                  spark.driver.maxResultSize = "10g"
-#                  spark.cores.max = 1#,
-#                 ,spark.rdd.compress="true"
-)
+options(expressions=10000)
+# 
+# spark.env <- list(spark.executor.memory="13g", 
+#                   spark.storage.memoryFraction = "0.1",
+#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
+#                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+# driver.memory="28g",
+# driver.maxResultSize='28g',
+#                   spark.driver.memory="10g", 
+#                   spark.driver.maxResultSize = "10g"
+# #                  spark.cores.max = 1#,
+# #                 ,spark.rdd.compress="true"
+# )
 
 master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 
@@ -83,8 +84,8 @@ poliresults <- stm(documents = documents,
                     prevalence = ~ s(day) + blog,
                    K = 100, spark.context = spark.context, 
                    init = "Spectral",
-                   spark.partitions = 256, 
-                   spark.persistence = "DISK_ONLY"
+                   spark.partitions = 10#, 
+#                   spark.persistence = "DISK_ONLY"
 )
 # # save(poliresuls, file="poliresults")
 # # 
@@ -123,5 +124,6 @@ bigtest <- stm(documents = out2$documents,
 )
 }
 # #sparkR.stop()
-#mediumtest()
+smalltest()
+mediumtest()
 bigtest()
