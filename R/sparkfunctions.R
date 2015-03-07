@@ -99,9 +99,9 @@ estep.hpb <- function(
                                siginv=siginv.in, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
                                sigmaentropy=sigmaentropy.in)
       
-      beta.ss[[document$a]][,words] <- doc.results$phis + beta.ss[[document$a]][,words]
-      sigma.ss <- sigma.ss + doc.results$eta$nu
-      lambda <- rbind(lambda, c(document$dn, document$l))
+      beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
+      sigma.ss <<- sigma.ss + doc.results$eta$nu
+      lambda <<- rbind(lambda, c(document$dn, document$l))
       c(document$dn, doc.results$bound)
     })
     index <- as.integer(split/sqrt(spark.partitions))
