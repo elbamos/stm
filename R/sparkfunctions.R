@@ -95,7 +95,7 @@ estep.hpb <- function(
       }
       
       #Solve for Hessian/Phi/Bound returning the result
-      doc.results <- stm:::hpb(document$l, doc.ct=document$d[2,], mu=mu.i,
+      doc.results <- hpb(document$l, doc.ct=document$d[2,], mu=mu.i,
                                siginv=siginv.in, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
                                sigmaentropy=sigmaentropy.in)
       
@@ -112,7 +112,8 @@ estep.hpb <- function(
                      l = lambda
     )))
   })
-  if (doDebug) {
+  if (TRUE) {
+    print("count")
     toss <- SparkR::count(part.rdd)
     print("count")
   }
@@ -400,4 +401,51 @@ envirolist <- function() {
       print(pryr::object_size(i))
     }
   }
+}
+
+# Hessian/Phi/Bound
+#   NB: Hessian function is not as carefully benchmarked as it isn't called
+#       nearly as often.  Particularly I suspect some of the elements in the
+#       cross product could be sped up quite a bit.
+#   NB: Bound and hessian barely communicate with one another here.
+hpb <- function(eta, doc.ct, mu, siginv, beta, Ndoc=sum(doc.ct), sigmaentropy) {
+  #basic transforms
+  expeta <- c(exp(eta),1)
+  theta <- expeta/sum(expeta)
+  
+  #pieces for the derivatives of the exp(eta)beta part
+  EB <- expeta*beta #calculate exp(eta)\beta for each word
+  EB <- t(EB)/colSums(EB) #transpose and norm by (now) the row
+  
+  #at this point EB is the phi matrix
+  phi <- EB*(doc.ct) #multiply through by word count
+  phisums <- colSums(phi)
+  phi <- t(phi) #transpose so its in the K by W format expected
+  EB <- EB*sqrt(doc.ct) #set up matrix to take the cross product
+  
+  #First piece is the quotient rule portion that shows up from E[z], second piece is the part
+  # that shows up regardless as in Wang and Blei (2013) for example.  Last element is just siginv
+  hess <- -((diag(phisums) - crossprod(EB)) - 
+              Ndoc*(diag(theta) - theta%o%theta))[1:length(eta),1:length(eta)] + siginv
+  
+  ###
+  # Bound
+  
+  nu <- try(chol2inv(chol.default(hess)), silent=TRUE)
+  if(class(nu)=="try-error") {
+    #brute force solve
+    nu <- solve(hess)
+    #only if we would produce negative variances do we bother doing nearPD
+    if(any(diag(nu)<0)) nu <- as.matrix(nearPD(nu)$mat)
+  }
+  diff <- eta - mu
+  logphinorm <- log(colSums(theta*beta))
+  part1 <- sum(doc.ct*logphinorm)
+  bound <- part1 + .5*determinant(nu, logarithm=TRUE)$modulus -
+    .5*sum(diff*crossprod(diff,siginv)) -
+    sigmaentropy
+  bound <- as.numeric(bound)
+  
+  #bundle everything up.
+  return(list(phis=phi, eta=list(lambda=eta, nu=nu), bound=bound))
 }
