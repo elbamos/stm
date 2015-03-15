@@ -16,12 +16,12 @@ source("./R/stm.control.R")
 source("./R/STMconvergence.R")
 source("./R/STMreport.R")
 
-#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=r3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 5 -a ami-0a613c62 launch vanillaspark
+#/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=r3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 10 -a ami-0a613c62 launch vanillaspark
 
 library(SparkR)
 
 doDebug <- FALSE
-reduction <- c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
+reduction <- "" #c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
 # COLLECT PARTITIONS
 # COUNT and COLLECT -- works up to medium size
@@ -31,28 +31,28 @@ reduction <- c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT"
 # KEY -- the best hope.  Function is programmatically correct. WORKS - 
 #       BUT RUNS OUT OF MEMORY AT START OF 3rd ITERATION WHILE SERIALIZING THE CLOSURE.  NOTE THAT THIS WAS WITH COUNT
 
-Sys.setenv(SPARK_MEM="3g")
+Sys.setenv(SPARK_MEM="5g")
 #options(expressions=10000)
 # 
-# spark.env <- list(spark.executor.memory="13g", 
-#                   spark.storage.memoryFraction = "0.1",
-#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
-#                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-# driver.memory="28g",
-# driver.maxResultSize='28g',
-#                   spark.driver.memory="10g", 
-#                   spark.driver.maxResultSize = "10g"
-# #                  spark.cores.max = 1#,
-# #                 ,spark.rdd.compress="true"
-# )
+spark.env <- list(spark.executor.memory="5g", 
+                  spark.storage.memoryFraction = "0.1",
+                  spark.serializer="org.apache.spark.serializer.KryoSerializer",
+                  spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+driver.memory="28g",
+driver.maxResultSize='28g',
+                  spark.driver.memory="5g", 
+                  spark.driver.maxResultSize = "5g"
+#                  spark.cores.max = 1#,
+#                 ,spark.rdd.compress="true"
+)
 
 master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 
-# spark.context <- sparkR.init(master=master,
-#                              appName = paste0("poli", Sys.time()),
-#                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
+spark.context <- sparkR.init(master=master,
+                             appName = paste0("poli", Sys.time()),
+                             sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 
-spark.context = sparkR.init("local")
+#spark.context = sparkR.init("local")
 
 smalltest <- function() {
   data(gadarian)
@@ -113,7 +113,7 @@ bigtest <- function() {
   bigtest <- stm(documents = out2$documents,
                  vocab = out2$vocab,
                  data = out2$meta, 
-                 max.em.its = 3, 
+                 max.em.its = 10, 
                  content = ~tag,
                  prevalence = ~screenName,
                  #                  control = list(cpp = TRUE), 
@@ -127,3 +127,6 @@ bigtest <- function() {
 #smalltest()
 #mediumtest()
 bigtest()
+
+#  Test results (bigtest())
+# 19 m1.large --  
