@@ -74,7 +74,8 @@ stm.control.spark <- function(documents, vocab, settings, model,
   # whether beta or mu could be implemented as rdd's which are then joined with documents.rdd
   # during the e-step. This would probably require accumulators, which have not 
   # yet been implemented in SparkR, to be efficient.
-  documents.rdd <- parallelize(spark.context, doclist, spark.partitions)
+  saveAsObjectFile(parallelize(spark.context, doclist, spark.partitions), "/tmp/docs.rdd")
+  documents.rdd <- objectFile(spark.context, "/tmp/docs.rdd", spark.partitions)
 
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu <- distribute.mu(mu, spark.context)

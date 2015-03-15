@@ -112,7 +112,7 @@ estep.hpb <- function(
                      l = lambda
     )))
   })
-  if (TRUE) {
+  if (FALSE) {
     print("count")
     toss <- SparkR::count(part.rdd)
     print("count")

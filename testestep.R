@@ -20,7 +20,7 @@ source("./R/STMreport.R")
 
 library(SparkR)
 
-doDebug <- TRUE
+doDebug <- FALSE
 reduction <- c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
 # COLLECT PARTITIONS
@@ -125,5 +125,5 @@ bigtest <- function() {
 }
 # #sparkR.stop()
 #smalltest()
-mediumtest()
-# bigtest()
+#mediumtest()
+bigtest()
