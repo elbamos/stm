@@ -4,7 +4,7 @@
 
 stm.control.spark <- function(documents, vocab, settings, model, 
                               spark.context, spark.partitions, 
-                              spark.persistence) {
+                              spark.persistence, spark.filename) {
   
   globaltime <- proc.time()
   verbose <- settings$verbose
@@ -74,8 +74,9 @@ stm.control.spark <- function(documents, vocab, settings, model,
   # whether beta or mu could be implemented as rdd's which are then joined with documents.rdd
   # during the e-step. This would probably require accumulators, which have not 
   # yet been implemented in SparkR, to be efficient.
-  saveAsObjectFile(parallelize(spark.context, doclist, spark.partitions), "/tmp/docs.rdd")
-  documents.rdd <- objectFile(spark.context, "/tmp/docs.rdd", spark.partitions)
+  filename <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
+  saveAsObjectFile(parallelize(spark.context, doclist, spark.partitions), filename)
+  documents.rdd <- objectFile(spark.context, filename, spark.partitions)
 
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu <- distribute.mu(mu, spark.context)

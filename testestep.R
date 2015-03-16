@@ -21,7 +21,7 @@ source("./R/STMreport.R")
 library(SparkR)
 
 doDebug <- FALSE
-reduction <- c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
+reduction <- ""# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
 # COLLECT PARTITIONS
 # COUNT and COLLECT -- works up to medium size
@@ -31,28 +31,31 @@ reduction <- c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT"
 # KEY -- the best hope.  Function is programmatically correct. WORKS - 
 #       BUT RUNS OUT OF MEMORY AT START OF 3rd ITERATION WHILE SERIALIZING THE CLOSURE.  NOTE THAT THIS WAS WITH COUNT
 
-Sys.setenv(SPARK_MEM="3g")
+Sys.setenv(SPARK_MEM="5g")
+
 #options(expressions=10000)
-# 
-# spark.env <- list(spark.executor.memory="13g", 
-#                   spark.storage.memoryFraction = "0.1",
-#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
-#                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-# driver.memory="28g",
-# driver.maxResultSize='28g',
-#                   spark.driver.memory="10g", 
-#                   spark.driver.maxResultSize = "10g"
-# #                  spark.cores.max = 1#,
-# #                 ,spark.rdd.compress="true"
-# )
+ram <- "6g"
+spark.env <- list(spark.executor.memory=ram, 
+                  spark.storage.memoryFraction = "0.1",
+                  spark.serializer="org.apache.spark.serializer.KryoSerializer",
+                  spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+driver.memory="28g",
+driver.maxResultSize='28g',
+                  spark.driver.memory=ram, 
+                  spark.driver.maxResultSize = ram
+#                  spark.cores.max = 1#,
+#                 ,spark.rdd.compress="true"
+)
 
 master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 
-# spark.context <- sparkR.init(master=master,
-#                              appName = paste0("poli", Sys.time()),
-#                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
+spark.context <- sparkR.init(master=master,
+                             appName = paste0("poli", Sys.time()),
+                             sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
 
-spark.context = sparkR.init("local")
+#spark.context = sparkR.init("local")
+
+filepath <- "hdfs://ec2-52-1-62-161.compute-1.amazonaws.com:9000/docs"
 
 smalltest <- function() {
   data(gadarian)
@@ -68,7 +71,8 @@ smalltest <- function() {
                  prevalence = ~ pid_rep + MetaID,
                  init.type= "Spectral", #control = list(nits=50, burnin=25, alpha=(50/20), eta=.01),
                  K = 20, spark.context = spark.context, 
-                 spark.partitions = 4
+                 spark.partitions = 4, 
+                 spark.filename = filepath
   )
 }
 mediumtest <- function() {
@@ -84,7 +88,8 @@ mediumtest <- function() {
                      prevalence = ~ s(day) + blog,
                      K = 100, spark.context = spark.context, 
                      init = "Spectral",
-                     spark.partitions = 10#, 
+                     spark.partitions = 19, 
+                     spark.filename = filepath#, 
                      #                   spark.persistence = "DISK_ONLY"
   )
   # # save(poliresuls, file="poliresults")
@@ -120,10 +125,12 @@ bigtest <- function() {
                  init.type = "Spectral",
                  K = 200, 
                  spark.context = spark.context, 
-                 spark.partitions = 10
+                 spark.partitions = 19, 
+                 spark.filename = filepath, 
+                 spark.persistence = "MEMORY_ONLY"
   )
 }
 # #sparkR.stop()
 #smalltest()
-#mediumtest()
+mediumtest()
 bigtest()
