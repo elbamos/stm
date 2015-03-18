@@ -303,25 +303,29 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   }
   
   verbose <- settings$verbose
-  
+  if(doDebug) print("mnreg")
   mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
     # each part should be a column from counts, representing a single vocabulary term
+    if (doDebug) print("in mnreg")
     offset.in <- value(offset.broadcast)
     covar.in <- value(covar.broadcast)
-    map.out <- sapply(part, USE.NAMES=FALSE,simplify=TRUE,function(a.count) {
+    i.start <- part[[1]]$t
+    map.out <- sapply(part, USE.NAMES=FALSE,simplify=FALSE,function(a.count) {
+      print("in sapply")
       i <- a.count$t
       counts.i <- a.count$c.i
-      if (is.null(a.count$m.i)) {
+      m.i <- a.count$m.i
+      if (is.null(m.i)) {
         offset2 <- offset.in
       } else {
-        offset2 <- a.count$m.i + offset.in
+        offset2 <- m.i + offset.in
       }
       
       mod <- NULL
       while(is.null(mod)) {
         mod <- tryCatch(glmnet(x=covar.in, y=counts.i, family="poisson", 
                                offset=offset2, standardize=FALSE,
-                               intercept=is.null(a.count$m.i), 
+                               intercept=is.null(m.i), 
                                lambda.min.ratio=lambda.min.ratio,
                                nlambda=nlambda, alpha=alpha,
                                maxit=maxit, thresh=thresh),
@@ -334,12 +338,71 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
       ic <- dev + ic.k*mod$df
       lambda <- which.min(ic)
       coef <- subM(mod$beta,lambda) #return coefficients
-      if(is.null(a.count$m.i)) coef <- c(mod$a0[lambda], coef)
-      c(i, coef)
+      if(is.null(m.i)) coef <- c(mod$a0[lambda], coef)
+#      c(i, coef)
+      if (is.null(m.i)) {
+        m.i <- coef[1]
+        coef <- coef[-1]
+      }
+      coef <- covar.in[i,] %*% coef
+      coef <- coef + m.i
+      coef <- exp(coef)
+      # if m.i is not NULL
+        # then m is the first element, which gets removed
+      # covar.in[i,] %*% coef
+      # add m to every cell
+      # exp()
+      print(str(coef))
+      coef #should we include some kind of index here?
     } )
-    list(value = map.out)
-  })
-  
+    print("out of sapply")
+    # now need to split it up into rows, and produce output that is keyed on row but identifies the columns
+    print(str(map.out))
+    out <- split(map.out, rep(1:nrow(map.out), ncol(map.out)))
+    print(str(out))
+    index <- 0
+    lapply(out, function(x) {
+      index <<- index + 1
+      list(index, 
+           list(i.start, #this won't work
+             x
+           ))
+    })
+  }) # output should be chunks of rows, keyed on row, identifying the starting column
+  mnred.rdd <- combineByKey(mnreg.rdd, createCombiner = function(v) {
+    C <- rep(NULL, V) #are we sure this is V?
+    C[v[[1]]:(v[[1]] + length(v[[2]]))] <- v[[2]]
+    C
+  }, mergeValue = function(C, v) {
+    C[v[[1]]:(v[[1]] + length(v[[2]]))] <- v[[2]]
+    C
+  }, mergeCombiners = `+`, as.integer(spark.partitions)) # output should be complete rows
+  mnreg.rdd <- flatMap(mnreg.rdd, function(x) {
+    row <- x[[1]]
+    value <- x[[2]]/sum(x[[2]])
+    out <- split(value, 1:length(value))
+    index <- 0
+    lapply(out, function(y) {
+      index <<- index + 1
+      position <- (index * K) + row # does this thing have K rows or V rows?
+      list(floor(position / K), #aspect
+           list(position %% K, y))
+    })
+  }) # output should be individual cells, keyed on aspect, and identifying position within 
+  mnreg.rdd <- combineByKey(mnreg.rdd, createCombiner = function(v) {
+    rows <- K # so its easy to swap if we get it wrong
+    cols <- V
+    C <- matrix(rep(NULL, V * K), nrow = rows) 
+    C[v[[1]] %% rows, floor(v[[1]] / cols)] <- v[[2]]
+    C
+  }, mergeValue = function(C, v) {
+    rows <- V # so its easy to swap if we get it wrong
+    cols <- K
+    C[v[[1]] %% rows, floor(v[[1]] / cols)] <- v[[2]]
+    C
+  }, mergeCombiners = `+`, as.integer(spark.partitions)) # output should be an rdd of the new beta
+  beta <- collect(mnreg.rdd)
+  beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
 
   coef <- reduce(mnreg.rdd, function(x,y)  {   
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
@@ -365,7 +428,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   
   linpred <- as.matrix(covar%*%coef) 
   
-  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
+  linpred <- sweep(linpred, 2, STATS=m, FUN="+") #adds m to each row, by rows
   #softmax
   explinpred <- exp(linpred)
   
