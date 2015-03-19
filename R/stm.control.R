@@ -81,6 +81,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu <- distribute.mu(mu, spark.context)
 
+
   if(!is.null(beta$kappa) && settings$tau$mode=="L1") {
     # If we are going to be running mnreg, broadcast the covariate matrix since
     # its a global.
@@ -104,6 +105,9 @@ stm.control.spark <- function(documents, vocab, settings, model,
     }  
     settings$covar <- covar
     settings$covar.broadcast <- broadcast(spark.context, covar)  
+    m <- settings$dim$wcounts$x
+    m <- log(m) - log(sum(m))
+    settings$m.broadcast <- broadcast(spark.context, m)
   }
   if (doDebug) print("Distributed initial rdd's")
   ############
