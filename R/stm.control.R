@@ -20,7 +20,8 @@ stm.control.spark <- function(documents, vocab, settings, model,
     mu <- list(mu=model$mu)
     sigma <- model$sigma
     beta <- list(beta=model$beta)
-    if(!is.null(model$kappa)) beta$kappa <- model$kappa
+    if(!is.null(model$kappa)) 
+      settings$bkappa <- model$kappa
     lambda <- model$lambda
     convergence <- NULL 
     #discard the old object
@@ -30,7 +31,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
     #extract from a standard STM object so we can simply continue.
     mu <- model$mu
     beta <- list(beta=lapply(model$beta$logbeta, exp))
-    if(!is.null(model$beta$kappa)) beta$kappa <- model$beta$kappa
+    if(!is.null(model$beta$kappa)) settings$bkappa <- model$beta$kappa # note this won't restart properly
     sigma <- model$sigma
     lambda <- model$eta
     convergence <- model$convergence
@@ -85,7 +86,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
   lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
 
 
-  if(!is.null(beta$kappa) && settings$tau$mode=="L1") {
+  if(!is.null(settings$bkappa) && settings$tau$mode=="L1") {
     # If we are going to be running mnreg, broadcast the covariate matrix since
     # its a global.
     rows <- settings$dim$A * settings$dim$K
@@ -111,6 +112,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
     m <- settings$dim$wcounts$x
     m <- log(m) - log(sum(m))
     settings$m.broadcast <- broadcast(spark.context, m)
+    settings$m <- m
   }
   if (doDebug) print("Distributed initial rdd's")
   ############
@@ -154,7 +156,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
     sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                              mu=mu.local$mu, sigprior=settings$sigma$prior)
     
-    if (is.null(beta$kappa)) {
+    if (is.null(settings$bkappa)) {
       beta.ss <- rbind(estep.output$b)[[1]]
       beta.ss <- beta.ss / rowSums(beta.ss)
       beta.distributed <- distribute.beta(beta = list(beta.ss), spark.context = spark.context, spark.partitions = spark.partitions)

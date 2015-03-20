@@ -127,8 +127,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
   # beta calculates, but beta is a key,value pair list, not just a list now
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
   
-  kappa <- list(m=m, params=kappa)
-  list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
+  list(beta = beta, nlambda=nlambda, beta.distributed = beta.distributed)
 }
 
 mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
@@ -242,7 +241,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   
   linpred <- as.matrix(covar%*%coef) 
   
-  linpred <- sweep(linpred, 2, STATS=m, FUN="+")
+  linpred <- sweep(linpred, 2, STATS=settings$m, FUN="+")
   #softmax
   explinpred <- exp(linpred)
   
@@ -254,6 +253,6 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   beta <- lapply(beta, matrix, nrow=K)
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
   
-  kappa <- list(m=m, params=kappa)
+  kappa <- list(params=kappa)
   list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
 }
