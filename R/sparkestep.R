@@ -240,10 +240,9 @@ estep.spark <- function(
     
     bound <- sapply(part, function(document) {
       init <- lambda.in[document$dn,]
-      if (is.null(document$nd)) {
-        document$nd <- sum(document$d[2,])
-      }
-      beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
+      words <- document$d[1,]
+      nd <- sum(document$d[2,])
+      beta.i.lambda <- beta.in[[document$a]][,words,drop=FALSE]
       if (ncol(mu.in) > 1) {
         mu.i <- mu.in[,document$dn]
       } else {
@@ -252,17 +251,11 @@ estep.spark <- function(
       eta <- optim(par=init, fn=lhood, gr=grad,
                           method="BFGS", control=list(maxit=500),
                           doc.ct=document$d[2,], mu=mu.i,
-                          siginv=siginv.in, beta=beta.i.lambda, Ndoc = document$nd)$par
-      words <- document$d[1,]
-      if (ncol(mu.in) > 1) {
-        mu.i <- mu.in[,document$dn]
-      } else {
-        mu.i <- as.numeric(mu.in)
-      }
+                          siginv=siginv.in, beta=beta.i.lambda, Ndoc = nd)$par
       
       #Solve for Hessian/Phi/Bound returning the result
       doc.results <- hpb(eta, doc.ct=document$d[2,], mu=mu.i,
-                         siginv=siginv.in, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
+                         siginv=siginv.in, beta=beta.in[[document$a]][,words,drop=FALSE], nd ,
                          sigmaentropy=sigmaentropy.in)
       
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]

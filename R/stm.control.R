@@ -162,7 +162,11 @@ stm.control.spark <- function(documents, vocab, settings, model,
       beta$beta.distributed <- beta.distributed
     }  else {
       if(settings$tau$mode=="L1") {
-        beta <- mnreg.spark(estep.output$b, settings, spark.context, spark.partitions)
+        if ("DIST_B" %in% mstep){
+          beta <- mnreg.spark.distributedbeta(estep.output$b, settings, spark.context, spark.partitions)
+        } else {  
+          beta <- mnreg.spark(estep.output$b, settings, spark.context, spark.partitions)
+        }
         beta.distributed <- beta$beta.distributed
       } else {
         beta <- stm:::jeffreysKappa(estep.output$b, kappa, settings) 

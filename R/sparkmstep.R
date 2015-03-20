@@ -167,8 +167,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
     index <<- index + 1
     list(
       t = index, 
-      c.i = x, 
-      m.i = ifelse(is.null(m), NULL, m[index])
+      c.i = x
     )
   })
   counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)

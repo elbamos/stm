@@ -23,6 +23,7 @@ source("./R/sparkestep.R")
 library(SparkR)
 
 doDebug <- TRUE
+mstep <- "DIST_B"
 reduction <- "COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
 # COLLECT PARTITIONS
