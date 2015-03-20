@@ -59,8 +59,9 @@ stm.control.spark <- function(documents, vocab, settings, model,
     list( 
       dn = index,
       d = x,
-      a = as.integer(betaindex[index]), 
-      l = lambda[index,])
+      a = as.integer(betaindex[index])#, 
+#      l = lambda[index,]
+  )
   })
   # documents.rdd is a value list (not a pair list).  Each iteration, 
   # the e-step runs logisticnormal inside mapPartitionsAsIndex to update lambda.
@@ -77,9 +78,11 @@ stm.control.spark <- function(documents, vocab, settings, model,
   filename <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
   saveAsObjectFile(parallelize(spark.context, doclist, spark.partitions), filename)
   documents.rdd <- objectFile(spark.context, filename, spark.partitions)
-
+  cache(documents.rdd)
+  
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu <- distribute.mu(mu, spark.context)
+  lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
 
 
   if(!is.null(beta$kappa) && settings$tau$mode=="L1") {
@@ -123,47 +126,27 @@ stm.control.spark <- function(documents, vocab, settings, model,
     siginv.broadcast <- broadcast(spark.context, siginv)
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
     
-    # keep track of the pointer so we can unpersist it as soon as the next one gets created
-    old.documents.rdd <- documents.rdd
-    documents.rdd <- estep.lambda( 
-      documents.rdd = documents.rdd,
-      beta.distributed = beta.distributed,
-      mu = mu, 
-      siginv.broadcast = siginv.broadcast,
-      spark.context = spark.context,
-      spark.partitions = spark.partitions,
-      verbose) 
-    # persist this because we'll use it twice - once for the hpb step, and 
-    # again when we update lambda
-    persist(documents.rdd, spark.persistence)
-    if ("COUNT" %in% reduction) {
-      toss <- count(documents.rdd)
-      unpersist(old.documents.rdd)
-    }
-    if (verbose) print("E-Step Phase 2")
-    estep.output <- estep.hpb(
+    estep.output <- estep.spark(
       documents.rdd = documents.rdd,
       A = settings$dim$A,
       K = settings$dim$K,
       V = length(vocab),
       beta.distributed = beta.distributed,
       mu = mu, 
+      lambda.distributed = lambda.distributed,
       siginv.broadcast = siginv.broadcast,
       sigmaentropy.broadcast = sigmaentropy.broadcast,
       spark.context = spark.context,
       spark.partitions = spark.partitions,
       verbose) 
-    if (doDebug) print("unpersist old rdd")
-    unpersist(old.documents.rdd)
-    print(str(estep.output))
-#    print(str(estep.output))
-    
+
     if(verbose) {
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
       t1 <- proc.time()
     }
 
     lambda <- estep.output$l
+    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
     mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                              covar=settings$covariates$X, settings$gamma$enet)
     mu <- distribute.mu(mu.local, spark.context, spark.partitions)

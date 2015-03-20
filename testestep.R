@@ -15,6 +15,8 @@ source("./R/stm.R")
 source("./R/stm.control.R")
 source("./R/STMconvergence.R")
 source("./R/STMreport.R")
+source("./R/sparkmstep.R")
+source("./R/sparkestep.R")
 
 #/usr/local/spark/ec2/spark-ec2 -i ~/sparkcluster.pem -k sparkcluster --instance-type=r3.xlarge --spot-price=0.04 --region=us-east-1 --zone=us-east-1e -s 5 -a ami-0a613c62 launch vanillaspark
 
@@ -35,27 +37,27 @@ Sys.setenv(SPARK_MEM="5g")
 
 #options(expressions=10000)
 ram <- "6g"
-# spark.env <- list(spark.executor.memory=ram, 
-#                   spark.storage.memoryFraction = "0.1",
-#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
-#                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-# driver.memory="28g",
-# driver.maxResultSize='28g',
-#                   spark.driver.memory=ram, 
-#                   spark.driver.maxResultSize = ram
-# #                  spark.cores.max = 1#,
-# #                 ,spark.rdd.compress="true"
-# )
-# 
-# master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
-# 
-# spark.context <- sparkR.init(master=master,
-#                              appName = paste0("poli", Sys.time()),
-#                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
-# filepath <- "hdfs://ec2-52-1-62-161.compute-1.amazonaws.com:9000/docs"
+spark.env <- list(spark.executor.memory=ram, 
+                  spark.storage.memoryFraction = "0.1",
+                  spark.serializer="org.apache.spark.serializer.KryoSerializer",
+                  spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+driver.memory="28g",
+driver.maxResultSize='28g',
+                  spark.driver.memory=ram, 
+                  spark.driver.maxResultSize = ram
+#                  spark.cores.max = 1#,
+#                 ,spark.rdd.compress="true"
+)
 
-spark.context = sparkR.init("local")
-filepath <- "/tmp/docs"
+master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
+
+spark.context <- sparkR.init(master=master,
+                             appName = paste0("poli", Sys.time()),
+                             sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
+filepath <- "hdfs://ec2-52-0-124-108.compute-1.amazonaws.com:9000/docs"
+
+# spark.context = sparkR.init("local")
+# filepath <- "/tmp/docs"
 
 smalltest <- function() {
   data(gadarian)
@@ -131,9 +133,11 @@ bigtest <- function() {
   )
 }
 # #sparkR.stop()
-smalltest()
-mediumtest()
+# smalltest()
+# mediumtest()
 bigtest()
 
 # using 19 m1.large instances
-# Vanilla   e-step 252, m-step 52
+# on one t2 instance      e-step 1200-1700        m-step 70
+# Vanilla                 e-step 252              m-step 52
+# 1-stage e-step          
