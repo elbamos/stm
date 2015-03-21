@@ -141,4 +141,6 @@ bigtest()
 # using 19 m1.large instances
 # on one t2 instance      e-step 1200-1700        m-step 70
 # Vanilla                 e-step 252              m-step 52
-# 1-stage e-step          
+# -- may have been a memory/storage thing going on here.  
+# 1-stage e-step          e-step 296              m-step 68
+# 1-stage e-step dist b   e-step 360              m-step 89

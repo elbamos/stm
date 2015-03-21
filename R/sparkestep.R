@@ -230,7 +230,7 @@ estep.spark <- function(
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
     }
     sigma.ss <- diag(0, nrow=(K-1))
-    lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
+    lambda <- list() # K - 1, plus 1 column for row order so we can sort later
     
     mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
@@ -242,7 +242,7 @@ estep.spark <- function(
       init <- lambda.in[document$dn,]
       words <- document$d[1,]
       nd <- sum(document$d[2,])
-      beta.i.lambda <- beta.in[[document$a]][,words,drop=FALSE]
+      beta.i <- beta.in[[document$a]][,words,drop=FALSE]
       if (ncol(mu.in) > 1) {
         mu.i <- mu.in[,document$dn]
       } else {
@@ -251,18 +251,19 @@ estep.spark <- function(
       eta <- optim(par=init, fn=lhood, gr=grad,
                           method="BFGS", control=list(maxit=500),
                           doc.ct=document$d[2,], mu=mu.i,
-                          siginv=siginv.in, beta=beta.i.lambda, Ndoc = nd)$par
+                          siginv=siginv.in, beta=beta.i, Ndoc = nd)$par
       
       #Solve for Hessian/Phi/Bound returning the result
       doc.results <- hpb(eta, doc.ct=document$d[2,], mu=mu.i,
-                         siginv=siginv.in, beta=beta.in[[document$a]][,words,drop=FALSE], nd ,
+                         siginv=siginv.in, beta=beta.i, nd ,
                          sigmaentropy=sigmaentropy.in)
       
-      beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
+      beta.ss[[document$a]][,words] <<- doc.results$phis + beta.i
       sigma.ss <<- sigma.ss + doc.results$eta$nu
-      lambda <<- rbind(lambda, c(document$dn, eta))
+      lambda[[documents$dn]] <<- c(document$dn, eta)
       c(document$dn, doc.results$bound)
     })
+    lambda <- do.call(lambda, rbind)
     index <- as.integer(split/sqrt(spark.partitions))
     list(list(key = index, list(
       s = sigma.ss, 
@@ -271,9 +272,8 @@ estep.spark <- function(
       l = lambda
     )))
   })
+  ss.rdd <- hpb.combiner(ss.rdd)
   out <- reduce(ss.rdd, function(x, y) {
-    if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
-    if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 2) x <- x[[2]]
     if (length(y) == 2) y <- y[[2]]
     if (length(x) == 4 && length(y) == 4) {
