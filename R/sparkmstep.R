@@ -1,4 +1,5 @@
-# getting rid of no-fixed-intercept
+# This implementation doesn't work right now.  The concept is to move some of the post-glmnet processing of
+# opt beta out into the cluster.
 mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.partitions) {
   #Parse Arguments
   A <- settings$dim$A
@@ -55,7 +56,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
     i.start <- part[[1]]$t
     m <- value(m.broadcast)
     
-    map.out <- sapply(part, USE.NAMES=FALSE,simplify=FALSE,function(a.count) {
+    coef <- sapply(part, USE.NAMES=FALSE,simplify=TRUE,function(a.count) {
       i <- a.count$t
       counts.i <- a.count$c.i
       offset2 <- m[i] + offset.in
@@ -78,51 +79,47 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
       lambda <- which.min(ic)
       subM(mod$beta,lambda) #return coefficients
     } )
-    
-    coef <- do.call(cbind,map.out)
-    coef <- covar.in %*% coef
-    coef <- sweep(coef, 2, STATS=m[i.start:(i.start + ncol(coef) - 1)], "+")
+
+#    coef <- do.call(cbind,map.out)
+    coef <- covar.in %*% coef # should have one column for each vocab in input, and rows = nrow(covar.in)
+                              # there should be A*K rows
+    if (nrow(coef) != A*K) stop("Coef AK Error")
+
+    coef <- matrix(coef)
+
+    coef <- sweep(coef, 2, 
+                  STATS=m[i.start:(i.start + ncol(coef) - 1)], FUN="+")
     coef <- exp(coef)
-    coef <- split(coef, ((1:(ncol(coef) * nrow(coef))) %% A) + 1  )
+
+    # want to split into one matrix per aspect.  First split into list of aspects, one vector each
+    coef <- split(coef, rep(1:A, K)  )
+
     index <- 0
     lapply(coef, function(x) {
       index <<- index + 1
       list(aspect = index, 
-           list(col = i.start, x))
+           list(col = i.start, x = x))
     })
-#     apply(coef, 1, function(x) {
-#       index <<- index + 1
-#       
-#       list(
-#         aspect = 1 + ((index - 1) %% A), 
-#         list(row = ceiling(index / A), 
-#              col = i.start,
-#              x
-#         )
-#       )
-#     })
-  }) # output should be chunks of what will become the beta list of matrices.  
+  })
   
   mnreg.rdd <- combineByKey(mnreg.rdd, createCombiner = function(v) {
-#    C <- matrix(rep(0, V * K), nrow = K)
-    C <- rep(0, V*K)
-    C[v[[1]]:(v[[1]] + length(v[[2]])-1) ] <- v[[2]]
+    C <- matrix(rep(0, V * K), nrow = K)
+    x <- matrix(v[[2]], nrow = K)
+    C[,v[[1]]:(v[[1]] + ncol(x-1) - 1) ] <- x
     C
   }, mergeValue = function(C, v) {
-    C[v[[1]]:(v[[1]] + length(v[[2]])-1) ] <- v[[2]]
+    x <- matrix(v[[2]], nrow = K)
+    C[,v[[1]]:(v[[1]] + ncol(x)-1) ] <- x
     C
   }, mergeCombiners = `+`, 
-  A
+  as.integer(spark.partitions)
   ) 
   
-#   mnreg.rdd <- mapValues(mnreg.rdd, function(x) {
-#     m <- value(m.broadcast)
-#     x <- sweep(x, 2, STATS = m, FUN = "+")
-#     x <- exp(x)
-#     x <- x / rowSums(x)
-#   })
+   mnreg.rdd <- mapValues(mnreg.rdd, function(x) {
+     x <- x / rowSums(x)
+   })
   beta <- collectAsMap(mnreg.rdd)
-  beta <- lapply(beta, function(x) {x / rowSums(x)})
+#  beta <- lapply(beta, function(x) {x / rowSums(x)})
   # beta calculates, but beta is a key,value pair list, not just a list now
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
   
@@ -241,9 +238,9 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   #linear predictor
   covar <- settings$covar
   
-  linpred <- as.matrix(covar%*%coef) 
+  linpred <- as.matrix(covar%*%coef) # preserves columns, but rows in output = rows in covar
   
-  linpred <- sweep(linpred, 2, STATS=settings$m, FUN="+")
+  linpred <- sweep(linpred, 2, STATS=settings$m, FUN="+") # applies m against each row
   #softmax
   explinpred <- exp(linpred)
   
