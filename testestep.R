@@ -36,27 +36,29 @@ reduction <-NULL #"COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTI
 
 ram <- "6g"
 Sys.setenv(SPARK_MEM=ram)
-
-# spark.env <- list(spark.executor.memory=ram, 
-#                   spark.storage.memoryFraction = "0.1",
-#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
-#                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-# driver.memory="28g",
-# driver.maxResultSize='28g',
-#                   spark.driver.memory=ram, 
-#                   spark.driver.maxResultSize = ram
-# )
-# 
-# master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
-# 
-# spark.context <- sparkR.init(master=master,
-#                              appName = paste0("poli", Sys.time()),
-#                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
-# filepath <- str_replace(master, "spark", "hdfs")
-# filepath <- str_replace(filepath, "7077", "9000/docs") #"hdfs://ec2-54-0-234-71.compute-1.amazonaws.com:9000/docs"
-
-spark.context = sparkR.init("local")
-filepath <- "/tmp/docs"
+cluster <- function() {
+  spark.env <- list(spark.executor.memory=ram, 
+                    spark.storage.memoryFraction = "0.1",
+                    spark.serializer="org.apache.spark.serializer.KryoSerializer",
+                    spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+  driver.memory="28g",
+  driver.maxResultSize='28g',
+                    spark.driver.memory=ram, 
+                    spark.driver.maxResultSize = ram
+  )
+  
+  master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
+  
+  spark.context <- sparkR.init(master=master,
+                               appName = paste0("poli", Sys.time()),
+                               sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
+  filepath <- str_replace(master, "spark", "hdfs")
+  filepath <- str_replace(filepath, "7077", "9000/docs") #"hdfs://ec2-54-0-234-71.compute-1.amazonaws.com:9000/docs"
+}
+local <- function() {
+  spark.context = sparkR.init("local")
+  filepath <- "/tmp/docs"
+}
 
 smalltest <- function() {
   data(gadarian)
@@ -131,7 +133,10 @@ bigtest <- function() {
                  spark.persistence = "MEMORY_ONLY"
   )
 }
-# #sparkR.stop()
+
+#local()
+cluster()
+
 # smalltest()
 # mediumtest()
 bigtest()
@@ -145,3 +150,5 @@ bigtest()
 # -- memory seemed to clear up, not sure if it was because of a SparkR revision...
 # 1-stage e-step distb    e-step 284              m-step 90
 # 1-stage, nodistb, 38cpu e-step 155              m-step 82
+# -- more refining of distributed beta, 38 cpus
+# 1-stage distb 38cpu     e-step 156              m-step 84
