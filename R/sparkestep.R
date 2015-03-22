@@ -260,10 +260,10 @@ estep.spark <- function(
       
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.i
       sigma.ss <<- sigma.ss + doc.results$eta$nu
-      lambda[[documents$dn]] <<- c(document$dn, eta)
+      lambda[[document$dn]] <<- c(document$dn, eta)
       c(document$dn, doc.results$bound)
     })
-    lambda <- do.call(lambda, rbind)
+    lambda <- do.call(rbind, lambda)
     index <- as.integer(split/sqrt(spark.partitions))
     list(list(key = index, list(
       s = sigma.ss, 

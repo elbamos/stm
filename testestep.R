@@ -37,28 +37,28 @@ reduction <- "COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION"
 Sys.setenv(SPARK_MEM="5g")
 
 #options(expressions=10000)
-ram <- "6g"
-spark.env <- list(spark.executor.memory=ram, 
-                  spark.storage.memoryFraction = "0.1",
-                  spark.serializer="org.apache.spark.serializer.KryoSerializer",
-                  spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
-driver.memory="28g",
-driver.maxResultSize='28g',
-                  spark.driver.memory=ram, 
-                  spark.driver.maxResultSize = ram
-#                  spark.cores.max = 1#,
-#                 ,spark.rdd.compress="true"
-)
+# ram <- "6g"
+# spark.env <- list(spark.executor.memory=ram, 
+#                   spark.storage.memoryFraction = "0.1",
+#                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
+#                   spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+# driver.memory="28g",
+# driver.maxResultSize='28g',
+#                   spark.driver.memory=ram, 
+#                   spark.driver.maxResultSize = ram
+# #                  spark.cores.max = 1#,
+# #                 ,spark.rdd.compress="true"
+# )
+# 
+# master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 
-master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
+# spark.context <- sparkR.init(master=master,
+#                              appName = paste0("poli", Sys.time()),
+#                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
+# filepath <- "hdfs://ec2-52-0-124-108.compute-1.amazonaws.com:9000/docs"
 
-spark.context <- sparkR.init(master=master,
-                             appName = paste0("poli", Sys.time()),
-                             sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
-filepath <- "hdfs://ec2-52-0-124-108.compute-1.amazonaws.com:9000/docs"
-
-# spark.context = sparkR.init("local")
-# filepath <- "/tmp/docs"
+spark.context = sparkR.init("local")
+filepath <- "/tmp/docs"
 
 smalltest <- function() {
   data(gadarian)
