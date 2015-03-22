@@ -179,7 +179,7 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
       c.i = x
     )
   })
-  saveAsObjectFile(parallelize(spark.context, counts.list, spark.partitions), settings$betafile)
+  saveAsObjectFile(parallelize(spark.context, counts.list, spark.partitions), paste0(settings$betafile, round(rnorm(1) * 10000)))
   counts.rdd <- objectFile(spark.context, settings$betafile, spark.partitions)
 #  counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
   rm(counts.list)
