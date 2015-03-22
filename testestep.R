@@ -55,7 +55,8 @@ master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
 spark.context <- sparkR.init(master=master,
                              appName = paste0("poli", Sys.time()),
                              sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
-filepath <- "hdfs://ec2-54-0-234-71.compute-1.amazonaws.com:9000/docs"
+filepath <- str_replace(master, "spark", "hdfs")
+filepath <- str_replace(filepath, "7077", "9000/docs") #"hdfs://ec2-54-0-234-71.compute-1.amazonaws.com:9000/docs"
 
 # spark.context = sparkR.init("local")
 # filepath <- "/tmp/docs"

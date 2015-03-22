@@ -90,30 +90,36 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
       subM(mod$beta,lambda) #return coefficients
     } )
     
- #   coef <- do.call(cbind,map.out)
+    coef <- do.call(cbind,map.out)
     coef <- covar.in %*% coef
     coef <- sweep(coef, 2, STATS=m[i.start:(i.start + ncol(coef) - 1)], "+")
     coef <- exp(coef)
+    coef <- split(coef, ((1:(ncol(coef) * nrow(coef))) %% A) + 1  )
     index <- 0
-    apply(coef, 1, function(x) {
+    lapply(coef, function(x) {
       index <<- index + 1
-      
-      list(
-        aspect = 1 + ((index - 1) %% A), 
-        list(row = ceiling(index / A), 
-             col = i.start,
-             x
-        )
-      )
+      list(aspect = index, 
+           list(col = i.start, x))
     })
+#     apply(coef, 1, function(x) {
+#       index <<- index + 1
+#       
+#       list(
+#         aspect = 1 + ((index - 1) %% A), 
+#         list(row = ceiling(index / A), 
+#              col = i.start,
+#              x
+#         )
+#       )
+#     })
   }) # output should be chunks of what will become the beta list of matrices.  
   
   mnreg.rdd <- combineByKey(mnreg.rdd, createCombiner = function(v) {
     C <- matrix(rep(0, V * K), nrow = K) 
-    C[v[["row"]],v[["col"]]:(v[["col"]] + length(v[["x"]])-1) ] <- v[["x"]]
+    C[,v[[1]]:(v[[1]] + ncol(v[[2]])-1) ] <- v[[2]]
     C
   }, mergeValue = function(C, v) {
-    C[v[["row"]],v[["col"]]:(v[["col"]] + length(v[["x"]])-1) ] <- v[["x"]]
+    C[,v[[1]]:(v[[1]] + ncol(v[[2]])-1) ] <- v[[2]]
     C
   }, mergeCombiners = `+`, 
   A
