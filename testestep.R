@@ -24,21 +24,19 @@ source("./R/sparkestep.R")
 library(SparkR)
 
 doDebug <- FALSE
-mstep <- "DIST_B"
+mstep <- "DIST_B" # only option DIST_B at the moment
 reduction <-NULL #"COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
 # COLLECT PARTITIONS
-# COUNT and COLLECT -- works up to medium size
-# COLLECT ALONE -- !!! COMPLETES THE COLLECTION PHASE, FAILS AS REDUCTION (memory & disk) - but super slow
-# REPARTITION -- appears to work, at least through one iteration
-# COMBINE -- does successfully shrink partitions, effect on RAM not clear.  desiralization error with large data?
-# KEY -- the best hope.  Function is programmatically correct. WORKS - 
-#       BUT RUNS OUT OF MEMORY AT START OF 3rd ITERATION WHILE SERIALIZING THE CLOSURE.  NOTE THAT THIS WAS WITH COUNT
+# COUNT and COLLECT -- 
+# COLLECT ALONE -- 
+# REPARTITION -- 
+# COMBINE -- 
+# KEY -- 
 
-Sys.setenv(SPARK_MEM="5g")
+ram <- "6g"
+Sys.setenv(SPARK_MEM=ram)
 
-#options(expressions=10000)
-# ram <- "6g"
 # spark.env <- list(spark.executor.memory=ram, 
 #                   spark.storage.memoryFraction = "0.1",
 #                   spark.serializer="org.apache.spark.serializer.KryoSerializer",
@@ -47,8 +45,6 @@ Sys.setenv(SPARK_MEM="5g")
 # driver.maxResultSize='28g',
 #                   spark.driver.memory=ram, 
 #                   spark.driver.maxResultSize = ram
-# #                  spark.cores.max = 1#,
-# #                 ,spark.rdd.compress="true"
 # )
 # 
 # master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
@@ -136,9 +132,9 @@ bigtest <- function() {
   )
 }
 # #sparkR.stop()
- smalltest()
+# smalltest()
 # mediumtest()
-#bigtest()
+bigtest()
 
 # using 19 m1.large instances
 # on one t2 instance      e-step 1200-1700        m-step 70

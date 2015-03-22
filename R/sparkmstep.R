@@ -26,7 +26,6 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
   offset <- log(mult.nobs)
   offset.broadcast <- broadcast(spark.context, offset)
   
-  
   # it is cheaper to re-distribute counts as an RDD each pass through the loop than it would be to 
   # convert the matrix from rows to columns.  This is something potentially worth revisiting
   # for very large data sets.
@@ -112,7 +111,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
     C[,v[[1]]:(v[[1]] + ncol(x)-1) ] <- x
     C
   }, mergeCombiners = `+`, 
-  as.integer(spark.partitions)
+  as.integer(round(sqrt(spark.partitions)))
   ) 
   
    mnreg.rdd <- mapValues(mnreg.rdd, function(x) {
