@@ -90,9 +90,10 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
       subM(mod$beta,lambda) #return coefficients
     } )
     
-    coef <- do.call(cbind,map.out)
+ #   coef <- do.call(cbind,map.out)
     coef <- covar.in %*% coef
-    
+    coef <- sweep(coef, 2, STATS=m[i.start:(i.start + ncol(coef) - 1)], "+")
+    coef <- exp(coef)
     index <- 0
     apply(coef, 1, function(x) {
       index <<- index + 1
@@ -105,25 +106,27 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
         )
       )
     })
-  }) # output should be rows  
+  }) # output should be chunks of what will become the beta list of matrices.  
   
   mnreg.rdd <- combineByKey(mnreg.rdd, createCombiner = function(v) {
     C <- matrix(rep(0, V * K), nrow = K) 
-    C[v[[1]],v[[2]]:(v[[2]] + length(v[[3]])-1) ] <- v[[3]]
+    C[v[["row"]],v[["col"]]:(v[["col"]] + length(v[["x"]])-1) ] <- v[["x"]]
     C
   }, mergeValue = function(C, v) {
-    C[v[[1]],v[[2]]:(v[[2]] + length(v[[3]])-1) ] <- v[[3]]
+    C[v[["row"]],v[["col"]]:(v[["col"]] + length(v[["x"]])-1) ] <- v[["x"]]
     C
   }, mergeCombiners = `+`, 
   A
   ) 
-  mnreg.rdd <- mapValues(mnreg.rdd, function(x) {
-    m <- value(m.broadcast)
-    x <- sweep(x, 2, STATS = m, FUN = "+")
-    x <- exp(x)
-    x <- x / rowSums(x)
-  })
+  
+#   mnreg.rdd <- mapValues(mnreg.rdd, function(x) {
+#     m <- value(m.broadcast)
+#     x <- sweep(x, 2, STATS = m, FUN = "+")
+#     x <- exp(x)
+#     x <- x / rowSums(x)
+#   })
   beta <- collectAsMap(mnreg.rdd)
+  beta <- lapply(beta, function(x) {x / rowSums(x)})
   # beta calculates, but beta is a key,value pair list, not just a list now
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
   
