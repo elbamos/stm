@@ -45,18 +45,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
   #########
   #Distributed Poissons
   #########
-  
-  #methods dispatch for S4 is crazy expensive so let's first define a function
-  #for quickly extracting the coefficients from the model.
-  subM <- function(x, p) {
-    ind <- (x@p[p]+1):x@p[p+1]
-    rn <- x@i[ind]+1
-    y <- x@x[ind]
-    out <- rep(0, length=nrow(x))
-    out[rn] <- y
-    out
-  }
-  
+
   verbose <- settings$verbose
   
   mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
@@ -115,11 +104,12 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
   }) # output should be chunks of what will become the beta list of matrices.  
   
   mnreg.rdd <- combineByKey(mnreg.rdd, createCombiner = function(v) {
-    C <- matrix(rep(0, V * K), nrow = K) 
-    C[,v[[1]]:(v[[1]] + ncol(v[[2]])-1) ] <- v[[2]]
+#    C <- matrix(rep(0, V * K), nrow = K)
+    C <- rep(0, V*K)
+    C[v[[1]]:(v[[1]] + length(v[[2]])-1) ] <- v[[2]]
     C
   }, mergeValue = function(C, v) {
-    C[,v[[1]]:(v[[1]] + ncol(v[[2]])-1) ] <- v[[2]]
+    C[v[[1]]:(v[[1]] + length(v[[2]])-1) ] <- v[[2]]
     C
   }, mergeCombiners = `+`, 
   A
@@ -137,6 +127,17 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
   
   list(beta = beta, nlambda=nlambda, beta.distributed = beta.distributed)
+}
+
+#methods dispatch for S4 is crazy expensive so let's first define a function
+#for quickly extracting the coefficients from the model.
+subM <- function(x, p) {
+  ind <- (x@p[p]+1):x@p[p+1]
+  rn <- x@i[ind]+1
+  y <- x@x[ind]
+  out <- rep(0, length=nrow(x))
+  out[rn] <- y
+  out
 }
 
 mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
@@ -178,23 +179,15 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
       c.i = x
     )
   })
-  counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
+  saveAsObjectFile(parallelize(spark.context, countslist, spark.partitions), settings$betafile)
+  counts.rdd <- objectFile(spark.context, settings$betafile, spark.partitions)
+#  counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
   rm(counts.list)
   
   #########
   #Distributed Poissons
   #########
-  
-  #methods dispatch for S4 is crazy expensive so let's first define a function
-  #for quickly extracting the coefficients from the model.
-  subM <- function(x, p) {
-    ind <- (x@p[p]+1):x@p[p+1]
-    rn <- x@i[ind]+1
-    y <- x@x[ind]
-    out <- rep(0, length=nrow(x))
-    out[rn] <- y
-    out
-  }
+
   
   verbose <- settings$verbose
   

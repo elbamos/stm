@@ -80,6 +80,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
   saveAsObjectFile(parallelize(spark.context, doclist, spark.partitions), filename)
   documents.rdd <- objectFile(spark.context, filename, spark.partitions)
   cache(documents.rdd)
+  settings$betafile <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
   
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu <- distribute.mu(mu, spark.context)

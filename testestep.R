@@ -23,7 +23,7 @@ source("./R/sparkestep.R")
 library(SparkR)
 
 doDebug <- FALSE
-mstep <- "DIST_B"
+mstep <- NULL #"DIST_B"
 reduction <-NULL #"COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
 # COLLECT PARTITIONS
@@ -129,7 +129,7 @@ bigtest <- function() {
                  init.type = "Spectral",
                  K = 200, 
                  spark.context = spark.context, 
-                 spark.partitions = 19, 
+                 spark.partitions = 38, 
                  spark.filename = filepath, 
                  spark.persistence = "MEMORY_ONLY"
   )
