@@ -70,6 +70,11 @@ stm.control.spark <- function(documents, vocab, settings, model,
       x
     })
   }
+  if ("DIST_M" %in% mstep) {
+    doclist <- lapply(doclist, FUN=function(x) {
+      list(x$dn, x)
+    })
+  }
   # documents.rdd is a value list (not a pair list).  Each iteration, 
   # the e-step runs logisticnormal inside mapPartitionsAsIndex to update lambda.
   # This produces a new documents.rdd, which is persisted in memory and on disk.
@@ -191,6 +196,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
     sigma.ss <- estep.output$s
     sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                              mu=mu.local$mu, sigprior=settings$sigma$prior)
+    # Do i need to update sigma$prior?
     
     if (is.null(settings$bkappa)) {
       beta.ss <- rbind(estep.output$b)[[1]]
