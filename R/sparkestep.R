@@ -17,8 +17,8 @@ estep.lambda <- function(
     
     lapply(part, function(document) {
       if ("DIST_M" %in% mstep) {
-        document <- document[[1]]
-        mu.i <- document[[2]]
+        document <- document[[2]][[1]]
+        mu.i <- document[[2]][[2]]
         document$mu.i <- mu.i
       } else {
         if (ncol(mu.in) > 1) {
@@ -255,8 +255,8 @@ estep.spark <- function(
     bound <- sapply(part, function(document) {
 
       if ("DIST_M" %in% mstep) {
-        document <- document[[1]]
-        mu.i <- document[[2]]
+        document <- document[[2]][[1]]
+        mu.i <- document[[2]][[2]]
       } else {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]

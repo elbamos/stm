@@ -144,7 +144,7 @@ bigtest <- function() {
 #local()
 cluster()
 
-# smalltest()
+#smalltest()
 # mediumtest()
 bigtest()
 
@@ -163,4 +163,4 @@ bigtest()
 # 1-stage distb 38cpu     e-step  158             m-step 97
 # 2-stage nodistb 38cpu   e-step  142             m-step 53
 # -- distb uses lapply instead of mapValues, and A partitions
-# 2-stage distb 38cpu     e-step 171              m-step 71
+# 2-stage distb 38cpu     e-step -             m-step 71

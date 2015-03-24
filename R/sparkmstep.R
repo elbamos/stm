@@ -293,14 +293,10 @@ opt.sigma.spark <- function(sigma.ss, lambda, mu, settings) {
     })
   } else {
     covariance.rdd <- join(lambda, mu, spark.partitions = as.integer(settings$spark.partitions))
-    
+    covariance.rdd <- mapValues(covariance.rdd, function(x) {x[[1]] - x[[2]]})
   } 
-  #find the covariance
-  if(ncol(mu)==1) {
-    covariance <- crossprod(sweep(lambda, 2, STATS=as.numeric(mu), FUN="-"))
-  } else {
-    covariance <- crossprod(lambda-t(mu)) 
-  }
+  # now need to take the crossproduct of covariance.rdd
+  # then figure out how to do the below...
   sigma <- (covariance + nu)/nrow(lambda) #add to estimation variance
   sigma <- diag(diag(sigma),nrow=nrow(nu))*sigprior + (1-sigprior)*sigma #weight by the prior
   return(sigma)
