@@ -34,9 +34,20 @@ distribute.lambda <- function(lambda, spark.context, spark.partitions) {
   broadcast(sc = spark.context, lambda)
 }
 
-distribute.mu <- function(mu, spark.context, spark.partitions) {
+distribute.mu <- function(mu, spark.context, spark.partitions, settings) {
+  if ("DIST_M" %in% mstep) {
+    mf <- paste0(settings$mufile, round(rnorm(1) * 10000))
+    index <<- 0
+    mu <- apply(mu$mu, MARGIN=2, function(x) {
+      list(index, 
+           x)
+    })
+    saveAsObjectFile(parallelize(spark.context, mu, spark.partitions), mf)
+    objectFile(spark.context, mf, spark.partitions)
+  } else {
   mu <- mu$mu
   broadcast(spark.context, mu)#)
+  }
 }
 
 # Hessian/Phi/Bound

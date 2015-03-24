@@ -11,21 +11,24 @@ estep.lambda <- function(
   
   mapPartitionsWithIndex(documents.rdd, function(split, part) {
     
-    mu.in <- value(mu.distributed)
+    if (! "DIST_M" %in% mstep) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
     
     lapply(part, function(document) {
-      init <- document$l
-      if (is.null(document$nd)) {
-        document$nd <- sum(document$d[2,])
-      }
-      beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
-      if (ncol(mu.in) > 1) {
-        mu.i <- mu.in[,document$dn]
+      if ("DIST_M" %in% mstep) {
+        document <- document[[1]]
+        mu.i <- document[[2]]
       } else {
-        mu.i <- as.numeric(mu.in)
+        if (ncol(mu.in) > 1) {
+          mu.i <- mu.in[,document$dn]
+        } else {
+          mu.i <- as.numeric(mu.in)
+        }        
       }
+      init <- document$l
+      beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
+
       document$l <- optim(par=init, fn=lhood, gr=grad,
                           method="BFGS", control=list(maxit=500),
                           doc.ct=document$d[2,], mu=mu.i,
@@ -152,19 +155,24 @@ estep.hpb <- function(
     sigma.ss <- diag(0, nrow=(K-1))
     lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
     
-    mu.in <- value(mu.distributed)
+    if (! "DIST_M" %in% mstep) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
     sigmaentropy.in <- value(sigmaentropy.broadcast)
     bound <- sapply(part, function(document) {
+      if ("DIST_M" %in% mstep) {
+        document <- document[[1]]
+        mu.i <- document[[2]]
+      } else {
+        if (ncol(mu.in) > 1) {
+          mu.i <- mu.in[,document$dn]
+        } else {
+          mu.i <- as.numeric(mu.in)
+        }        
+      }
       eta <- document$l
       words <- document$d[1,]
-      if (ncol(mu.in) > 1) {
-        mu.i <- mu.in[,document$dn]
-      } else {
-        mu.i <- as.numeric(mu.in)
-      }
-      
+
       #Solve for Hessian/Phi/Bound returning the result
       doc.results <- hpb(document$l, doc.ct=document$d[2,], mu=mu.i,
                          siginv=siginv.in, beta=beta.in[[document$a]][,words,drop=FALSE], document$nd ,
@@ -225,6 +233,7 @@ estep.spark <- function(
   verbose) {
   
   ss.rdd <- mapPartitionsWithIndex(documents.rdd, function(split, part) {
+
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
@@ -232,30 +241,37 @@ estep.spark <- function(
     sigma.ss <- diag(0, nrow=(K-1))
     lambda <- list() # K - 1, plus 1 column for row order so we can sort later
     
-    mu.in <- value(mu.distributed)
+    if (! "DIST_M" %in% mstep) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
     sigmaentropy.in <- value(sigmaentropy.broadcast)
     lambda.in <- value(lambda.distributed)
-    
+
     bound <- sapply(part, function(document) {
+
+      if ("DIST_M" %in% mstep) {
+        document <- document[[1]]
+        mu.i <- document[[2]]
+      } else {
+        if (ncol(mu.in) > 1) {
+          mu.i <- mu.in[,document$dn]
+        } else {
+          mu.i <- as.numeric(mu.in)
+        }        
+      }
+
       init <- lambda.in[document$dn,]
       words <- document$d[1,]
-      nd <- sum(document$d[2,])
       beta.i <- beta.in[[document$a]][,words,drop=FALSE]
-      if (ncol(mu.in) > 1) {
-        mu.i <- mu.in[,document$dn]
-      } else {
-        mu.i <- as.numeric(mu.in)
-      }
+
       eta <- optim(par=init, fn=lhood, gr=grad,
                           method="BFGS", control=list(maxit=500),
                           doc.ct=document$d[2,], mu=mu.i,
-                          siginv=siginv.in, beta=beta.i, Ndoc = nd)$par
+                          siginv=siginv.in, beta=beta.i, Ndoc = document$nd)$par
       
       #Solve for Hessian/Phi/Bound returning the result
       doc.results <- hpb(eta, doc.ct=document$d[2,], mu=mu.i,
-                         siginv=siginv.in, beta=beta.i, nd ,
+                         siginv=siginv.in, beta=beta.i, document$nd ,
                          sigmaentropy=sigmaentropy.in)
       
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.i
@@ -289,6 +305,7 @@ estep.spark <- function(
       )
     }
   })
+  print(str(out))
   bound.ss <- out$bd[order(out$bd[,1]),]
   out$bd <- bound.ss[,2]
   lambda <- out$l[order(out$l[,1]),]

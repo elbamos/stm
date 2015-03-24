@@ -60,10 +60,16 @@ stm.control.spark <- function(documents, vocab, settings, model,
     list( 
       dn = index,
       d = x,
-      a = as.integer(betaindex[index])#, 
-#      l = lambda[index,]
+      a = as.integer(betaindex[index]),
+      nd = sum(x[2,])
   )
   })
+  if (estages == 2) {
+    doclist <- lapply(doclist, FUN = function(x) {
+      x$l <- lambda[x$dn,]
+      x
+    })
+  }
   # documents.rdd is a value list (not a pair list).  Each iteration, 
   # the e-step runs logisticnormal inside mapPartitionsAsIndex to update lambda.
   # This produces a new documents.rdd, which is persisted in memory and on disk.
@@ -79,11 +85,12 @@ stm.control.spark <- function(documents, vocab, settings, model,
   filename <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
   saveAsObjectFile(parallelize(spark.context, doclist, spark.partitions), filename)
   documents.rdd <- objectFile(spark.context, filename, spark.partitions)
-  cache(documents.rdd)
+  persist(documents.rdd, spark.persistence)
   settings$betafile <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
+  settings$mufile <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
   
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
-  mu <- distribute.mu(mu, spark.context)
+  mu.distributed <- distribute.mu(mu, spark.context, spark.partitions = spark.partitions, settings)
   lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
 
 
@@ -128,20 +135,48 @@ stm.control.spark <- function(documents, vocab, settings, model,
     siginv <- solve(sigma)
     siginv.broadcast <- broadcast(spark.context, siginv)
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
-    
-    estep.output <- estep.spark(
-      documents.rdd = documents.rdd,
-      A = settings$dim$A,
-      K = settings$dim$K,
-      V = length(vocab),
-      beta.distributed = beta.distributed,
-      mu = mu, 
-      lambda.distributed = lambda.distributed,
-      siginv.broadcast = siginv.broadcast,
-      sigmaentropy.broadcast = sigmaentropy.broadcast,
-      spark.context = spark.context,
-      spark.partitions = spark.partitions,
-      verbose) 
+    if ("DIST_M" %in% mstep) {
+      documents.rdd <- join(documents.rdd, mu.distributed, as.integer(spark.partitions))
+    }
+    if (estages == 1) {
+      estep.output <- estep.spark(
+        documents.rdd = documents.rdd,
+        A = settings$dim$A,
+        K = settings$dim$K,
+        V = length(vocab),
+        beta.distributed = beta.distributed,
+        mu = mu.distributed, 
+        lambda.distributed = lambda.distributed,
+        siginv.broadcast = siginv.broadcast,
+        sigmaentropy.broadcast = sigmaentropy.broadcast,
+        spark.context = spark.context,
+        spark.partitions = spark.partitions,
+        verbose)
+    } else {
+      old <- documents.rdd
+      documents.rdd <- estep.lambda( 
+        documents.rdd,
+        beta.distributed,
+        mu.distributed, 
+        siginv.broadcast,
+        spark.context,
+        spark.partitions,
+        verbose)
+      persist(documents.rdd, spark.persistence)
+      estep.output <- estep.hpb( 
+        length(vocab), 
+        settings$dim$K,
+        settings$dim$A,
+        documents.rdd,
+        beta.distributed,
+        mu.distributed, 
+        siginv.broadcast,
+        sigmaentropy.broadcast,
+        spark.context,
+        spark.partitions,
+        verbose)
+      unpersist(old)
+    }
 
     if(verbose) {
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
@@ -149,10 +184,10 @@ stm.control.spark <- function(documents, vocab, settings, model,
     }
 
     lambda <- estep.output$l
-    lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
+    if (estages == 1) lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
     mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                              covar=settings$covariates$X, settings$gamma$enet)
-    mu <- distribute.mu(mu.local, spark.context, spark.partitions)
+    mu.distributed <- distribute.mu(mu.local, spark.context, spark.partitions)
     sigma.ss <- estep.output$s
     sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                              mu=mu.local$mu, sigprior=settings$sigma$prior)

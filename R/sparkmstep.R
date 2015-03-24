@@ -39,7 +39,9 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
       #      m.i = ifelse(is.null(m), NULL, m[index])
     )
   })
-  counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
+  bf <- paste0(settings$betafile, round(rnorm(1) * 10000))
+  saveAsObjectFile(parallelize(spark.context, counts.list, spark.partitions), bf)
+  counts.rdd <- objectFile(spark.context, bf, spark.partitions)
   rm(counts.list)
   
   #########
@@ -175,8 +177,9 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
       c.i = x
     )
   })
-  saveAsObjectFile(parallelize(spark.context, counts.list, spark.partitions), paste0(settings$betafile, round(rnorm(1) * 10000)))
-  counts.rdd <- objectFile(spark.context, settings$betafile, spark.partitions)
+  bf <- paste0(settings$betafile, round(rnorm(1) * 10000))
+  saveAsObjectFile(parallelize(spark.context, counts.list, spark.partitions), bf)
+  counts.rdd <- objectFile(spark.context, bf, spark.partitions)
 #  counts.rdd <- parallelize(spark.context, counts.list, spark.partitions)
   rm(counts.list)
   
