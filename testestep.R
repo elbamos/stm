@@ -29,7 +29,7 @@ library(SparkR)
 
 doDebug <- FALSE
 mstep <- c("DIST_B")#, "DIST_M") # "DIST_M"
-estages <- 1
+estages <- 2
 reduction <-NULL #"COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
 # COLLECT PARTITIONS
@@ -159,3 +159,7 @@ bigtest()
 # 1-stage, nodistb, 38cpu e-step 155              m-step 82
 # -- more refining of distributed beta, 38 cpus
 # 1-stage distb 38cpu     e-step 156              m-step 84
+# -- consolidating doc counts in documents.rdd, switch 1-2 stage, distm saves object file, sqrt(p) b partitions
+# 1-stage distb 38cpu     e-step  158             m-step 97
+# 2-stage nodistb 38cpu   e-step  142             m-step 53
+# -- distb uses lapply instead of mapValues, and A partitions

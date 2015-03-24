@@ -113,13 +113,14 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
     C[,v[[1]]:(v[[1]] + ncol(x)-1) ] <- x
     C
   }, mergeCombiners = `+`, 
-  as.integer(round(sqrt(spark.partitions)))
+  as.integer(A)
   ) 
   
-   mnreg.rdd <- mapValues(mnreg.rdd, function(x) {
-     x <- x / rowSums(x)
-   })
+#    mnreg.rdd <- mapValues(mnreg.rdd, function(x) {
+#      x <- x / rowSums(x)
+#    })
   beta <- collectAsMap(mnreg.rdd)
+  beta <- lapply(beta, function(x) { x / rowSums(x)})
 #  beta <- lapply(beta, function(x) {x / rowSums(x)})
   # beta calculates, but beta is a key,value pair list, not just a list now
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
