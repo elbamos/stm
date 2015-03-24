@@ -28,7 +28,7 @@ library(SparkR)
 #
 
 doDebug <- FALSE
-mstep <- c("DIST_B")#, "DIST_M") # "DIST_M"
+mstep <- c("DIST_M")#, "DIST_M") # "DIST_M"
 estages <- 2
 reduction <-NULL #"COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
@@ -163,3 +163,4 @@ bigtest()
 # 1-stage distb 38cpu     e-step  158             m-step 97
 # 2-stage nodistb 38cpu   e-step  142             m-step 53
 # -- distb uses lapply instead of mapValues, and A partitions
+# 2-stage distb 38cpu     e-step 171              m-step 71

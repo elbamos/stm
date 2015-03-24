@@ -19,6 +19,7 @@ estep.lambda <- function(
       if ("DIST_M" %in% mstep) {
         document <- document[[1]]
         mu.i <- document[[2]]
+        document$mu.i <- mu.i
       } else {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
@@ -33,7 +34,11 @@ estep.lambda <- function(
                           method="BFGS", control=list(maxit=500),
                           doc.ct=document$d[2,], mu=mu.i,
                           siginv=siginv.in, beta=beta.i.lambda, Ndoc = document$nd)$par
-      document
+      if ("DIST_M" %in% mstep) {
+        list(document$dn, document)
+      } else {
+        document
+      }
     }
     )
   })
@@ -161,8 +166,8 @@ estep.hpb <- function(
     sigmaentropy.in <- value(sigmaentropy.broadcast)
     bound <- sapply(part, function(document) {
       if ("DIST_M" %in% mstep) {
-        document <- document[[1]]
-        mu.i <- document[[2]]
+        document <- document[[2]]
+        mu.i <- document$mu.i
       } else {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
