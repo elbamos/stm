@@ -295,6 +295,33 @@ opt.sigma.spark <- function(sigma.ss, lambda, mu, settings) {
     covariance.rdd <- join(lambda, mu, spark.partitions = as.integer(settings$spark.partitions))
     covariance.rdd <- mapValues(covariance.rdd, function(x) {x[[1]] - x[[2]]})
   } 
+  covar.cells.rdd <- mapPartitions(covariance.rdd, function(part) {
+    startrow <- part[[1]][[1]]
+    interim <- lapply(part, function(x) x[[2]])
+    interim <- do.call(cbind, interim)
+    index <- 0
+    apply(interim, MARGIN=1, function(x) {
+      index <<- index + 1
+      list(index, 
+           list(colstart = startrow,
+                x
+                ))
+    })
+  })
+  covar.rows.rdd <- combineByKey(covar.cells.rdd, function(v) {
+    C <- rep(0, K - 1)
+    C[v[[1]]:(v[[1]] + length(v[[2]]) - 1)] <- v[[2]]
+    C
+  }, function(C, v) {
+    C[v[[1]]:(v[[1]] + length(v[[2]]) - 1)] <- v[[2]]
+    C
+  }, 
+  "+", 
+  as.integer(spark.partitions)
+  })
+  crossprod.rdd <- fullOuterJoin(covar.rows.rdd, covariance.rdd)
+  crossprod.rdd <- map
+  
   # now need to take the crossproduct of covariance.rdd
   # then figure out how to do the below...
   sigma <- (covariance + nu)/nrow(lambda) #add to estimation variance
