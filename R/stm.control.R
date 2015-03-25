@@ -52,7 +52,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
   if (is.null(spark.partitions)) spark.partitions <- as.integer(4 * round(log(settings$dim$N * settings$dim$K * settings$dim$A)))
   includePackage(spark.context, "glmnet")
   includePackage(spark.context,"Matrix")
-  include(Package(spark.context, "assertthat"))
+  includePackage(spark.context, "assertthat")
 #  includePackage(spark.context, "plyr")
 
   index <- 0

@@ -28,7 +28,7 @@ library(SparkR)
 #
 
 doDebug <- FALSE
-mstep <- c("DIST_M")#, "DIST_M") # "DIST_M"
+mstep <- NULL# c("DIST_M")#, "DIST_M") # "DIST_M"
 estages <- 2
 reduction <-NULL #"COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
 # COLLECT and
