@@ -259,11 +259,16 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
   list(beta = beta, kappa=kappa, nlambda=nlambda, beta.distributed = beta.distributed)
 }
 
+#
+# This function has not been tested - there's no point until we have a viable theory of how to do 
+# opt sigma in the cluster, which as of now we don't.  
+#
 opt.mu.spark <- function(lambda, settings, mode=c("CTM","Pooled", "L1"), covar=NULL, enet=NULL) {
   mode <- settings$gamma$mode
   if (mode == "L1") return(stm:::opt.mu(lambda, mode, covar, enet))
   if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
   index <- 0
+  # need to turn lambda into columns -- which is interesting since we need lambda to be rows for opt sigma
   lambda.out <- apply(lambda, MARGIN=2, function(x) {
     index <<- index + 1
     list(index, x)
@@ -283,6 +288,13 @@ opt.mu.spark <- function(lambda, settings, mode=c("CTM","Pooled", "L1"), covar=N
   })
 }
 
+#
+# This function is not complete -- it should work partially, 
+# but we haven't yet figured out a good way to do the crossprod.
+# Also reallly should think this through.  Since it wants lambda as an .rdd of rows, 
+# we could loop it through documents.rdd, or through hpb.rdd (persisting that). 
+# But we need to solve sigma and broadcast it since we need all of sigma in the e-step.  So, to think about. 
+#
 opt.sigma.spark <- function(sigma.ss, lambda, mu, settings) {  
   sigprior <- settings$sigma$prior
   # Assume that lambda is an rdd, and mu is an rdd unless its only one column
@@ -318,9 +330,26 @@ opt.sigma.spark <- function(sigma.ss, lambda, mu, settings) {
   }, 
   "+", 
   as.integer(spark.partitions)
+  )
+  covar.rows.rdd <- flatMap(covar.rows.rdd, function(x) {
+    out <- list()
+    for (i in 1:(K-1)) {
+      out[[i]] <- list(coltomatch = i, 
+           list(row = x[[1]], 
+                x[[2]]))
+    }
   })
-  crossprod.rdd <- fullOuterJoin(covar.rows.rdd, covariance.rdd)
-  crossprod.rdd <- map
+  crossprod.rdd <- rightOuterJoin(covar.rows.rdd, covariance.rdd, as.integer(spark.partitions))
+  crossprod.rdd <- mapPartitions(crossprod.rdd, function(part) {
+    out <- matrix(rep(0, (K-1)^2), nrow = K - 1)
+    lapply(part, function(x) {
+      out.column <- x[[1]]
+      in.column <- x[[2]][[2]]
+      out.row <- x[[2]][[1]]$row
+      in.row <- x[[2]][[1]]$x
+      out[out.row, in.row] <<- sum(in.column * in.row)
+    })
+  })
   
   # now need to take the crossproduct of covariance.rdd
   # then figure out how to do the below...

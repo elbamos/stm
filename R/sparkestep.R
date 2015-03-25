@@ -11,16 +11,20 @@ estep.lambda <- function(
   
   mapPartitionsWithIndex(documents.rdd, function(split, part) {
     
-    if (! "DIST_M" %in% mstep) mu.in <- value(mu.distributed)
+    if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
-    
+    assert_that(length(part) > 0)
     lapply(part, function(document) {
       if ("DIST_M" %in% mstep) {
-        document <- document[[2]][[1]]
-        mu.i <- document[[2]][[2]]
-        document$mu.i <- mu.i
-      } else {
+        document <- document[[2]]
+        if (length(document) == 2) {
+          mu.i <- document[[2]]
+          document <- document[[1]]
+          document$mu.i <- mu.i
+        }
+      }
+      if ("Broadcast" %in% class(mu.distributed)) {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
         } else {
@@ -39,8 +43,7 @@ estep.lambda <- function(
       } else {
         document
       }
-    }
-    )
+    })
   })
 }
 
@@ -160,15 +163,17 @@ estep.hpb <- function(
     sigma.ss <- diag(0, nrow=(K-1))
     lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
     
-    if (! "DIST_M" %in% mstep) mu.in <- value(mu.distributed)
+    if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
     sigmaentropy.in <- value(sigmaentropy.broadcast)
+    assertthat::assert_that(length(part) > 0)
     bound <- sapply(part, function(document) {
       if ("DIST_M" %in% mstep) {
         document <- document[[2]]
         mu.i <- document$mu.i
-      } else {
+      } 
+      if ("Broadcast" %in% class(mu.distributed)) {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
         } else {
@@ -203,18 +208,12 @@ estep.hpb <- function(
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 2) x <- x[[2]]
     if (length(y) == 2) y <- y[[2]]
-    if (length(x) == 4 && length(y) == 4) {
+    assertthat::assert_that(length(x) == 4, length(x) == length(y))
       list(bd = rbind(x$bd, y$bd), 
            s = x$s + y$s, 
            b = merge.beta(x$b, y$b), 
            l = rbind(x$l, y$l)
       )
-    } else { 
-      stop(paste("bad reduction match",
-                 str(x),
-                 str(y))
-      )
-    }
   })
   bound.ss <- out$bd[order(out$bd[,1]),]
   out$bd <- bound.ss[,2]
@@ -255,16 +254,21 @@ estep.spark <- function(
     bound <- sapply(part, function(document) {
 
       if ("DIST_M" %in% mstep) {
-        document <- document[[2]][[1]]
-        mu.i <- document[[2]][[2]]
-      } else {
+        document <- document[[2]]
+        if (length(document) == 2) {
+          mu.i <- document[[2]]
+          document <- document[[1]]
+          document$mu.i <- mu.i
+        }
+      }
+      if ("Broadcast" %in% class(mu.distributed)) {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
         } else {
           mu.i <- as.numeric(mu.in)
         }        
       }
-
+      
       init <- lambda.in[document$dn,]
       words <- document$d[1,]
       beta.i <- beta.in[[document$a]][,words,drop=FALSE]
@@ -310,7 +314,6 @@ estep.spark <- function(
       )
     }
   })
-  print(str(out))
   bound.ss <- out$bd[order(out$bd[,1]),]
   out$bd <- bound.ss[,2]
   lambda <- out$l[order(out$l[,1]),]

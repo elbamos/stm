@@ -1,6 +1,11 @@
-doDebug <- FALSE
-#reduction <- "NONE"
-
+# sparkobject <- list(
+#   sc = spark.context, 
+#   docfilename = , 
+#   covar.broadcast = ,
+#   m.broadcast = , 
+#   documents.rdd = ,
+#   
+# )
 
 lhood <- function(eta, doc.ct, mu, siginv,beta, Ndoc) {
   expeta <- c(exp(eta),1)
@@ -35,13 +40,19 @@ distribute.lambda <- function(lambda, spark.context, spark.partitions) {
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions, settings) {
-  if ("DIST_M" %in% mstep) {
+  print(str(mu))
+  if ("DIST_M" %in% mstep && ncol(mu$mu) > 1) {
+    print("distributing mu")
+    print(str(mu))
     mf <- paste0(settings$mufile, round(rnorm(1) * 10000))
-    index <<- 0
+    index <- 0
     mu <- apply(mu$mu, MARGIN=2, function(x) {
-      list(index, 
+      index <<- index + 1
+      list(as.integer(index), 
            x)
     })
+    print(str(mu))
+#    parallelize(spark.context, mu, spark.partitions)
     saveAsObjectFile(parallelize(spark.context, mu, spark.partitions), mf)
     objectFile(spark.context, mf, spark.partitions)
   } else {

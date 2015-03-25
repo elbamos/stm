@@ -52,13 +52,14 @@ stm.control.spark <- function(documents, vocab, settings, model,
   if (is.null(spark.partitions)) spark.partitions <- as.integer(4 * round(log(settings$dim$N * settings$dim$K * settings$dim$A)))
   includePackage(spark.context, "glmnet")
   includePackage(spark.context,"Matrix")
+  include(Package(spark.context, "assertthat"))
 #  includePackage(spark.context, "plyr")
 
   index <- 0
   doclist <- lapply(documents, FUN = function(x) {
     index <<- index + 1
     list( 
-      dn = index,
+      dn = as.integer(index),
       d = x,
       a = as.integer(betaindex[index]),
       nd = sum(x[2,])
@@ -70,11 +71,13 @@ stm.control.spark <- function(documents, vocab, settings, model,
       x
     })
   }
-  if ("DIST_M" %in% mstep) {
+
+  if ("DIST_M" %in% mstep) { # need to turn this into a K,V pair RDD
     doclist <- lapply(doclist, FUN=function(x) {
       list(x$dn, x)
     })
   }
+
   # documents.rdd is a value list (not a pair list).  Each iteration, 
   # the e-step runs logisticnormal inside mapPartitionsAsIndex to update lambda.
   # This produces a new documents.rdd, which is persisted in memory and on disk.
@@ -140,7 +143,8 @@ stm.control.spark <- function(documents, vocab, settings, model,
     siginv <- solve(sigma)
     siginv.broadcast <- broadcast(spark.context, siginv)
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
-    if ("DIST_M" %in% mstep) {
+    if ("DIST_M" %in% mstep && ! "Broadcast" %in% class(mu.distributed)) {
+      print("mu is an rdd")
       documents.rdd <- join(documents.rdd, mu.distributed, as.integer(spark.partitions))
     }
     if (estages == 1) {
@@ -191,13 +195,13 @@ stm.control.spark <- function(documents, vocab, settings, model,
     lambda <- estep.output$l
     if (estages == 1) lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
     mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
-                             covar=settings$covariates$X, settings$gamma$enet)
-    mu.distributed <- distribute.mu(mu.local, spark.context, spark.partitions)
+                           covar=settings$covariates$X, settings$gamma$enet)
+    mu.distributed <- distribute.mu(mu.local, spark.context, spark.partitions, settings)
     sigma.ss <- estep.output$s
     sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                              mu=mu.local$mu, sigprior=settings$sigma$prior)
     # Do i need to update sigma$prior?
-    
+  
     if (is.null(settings$bkappa)) {
       beta.ss <- rbind(estep.output$b)[[1]]
       beta.ss <- beta.ss / rowSums(beta.ss)
