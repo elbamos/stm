@@ -9,14 +9,27 @@ estep.lambda <- function(
   spark.partitions,
   verbose) {
   
+  #
+  # If mu is not being turned into an rdd, use 0.  If mu is being turned into an rdd,
+  # it will still be broadcast on the first iteration so use 1.  If its already an rdd, use 2. 
+  #
+  mstage <- 0
+  if ("DIST_M" %in% mstep) {
+    if ("Broadcast" %in% class(mu.distributed)) {
+      mstage <- 1
+    } else {
+      mstage <- 2
+    }
+  }
+  
   mapPartitionsWithIndex(documents.rdd, function(split, part) {
     
-    if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
+    if (mstage < 2) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
     assert_that(length(part) > 0)
     lapply(part, function(document) {
-      if ("DIST_M" %in% mstep) {
+      if (mstage > 0) {
         document <- document[[2]]
         if (length(document) == 2) {
           mu.i <- document[[2]]
@@ -24,21 +37,21 @@ estep.lambda <- function(
           document$mu.i <- mu.i
         }
       }
-      if ("Broadcast" %in% class(mu.distributed)) {
+      if (mstage < 2) {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
         } else {
           mu.i <- as.numeric(mu.in)
         }        
       }
-      init <- document$l
-      beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
 
-      document$l <- optim(par=init, fn=lhood, gr=grad,
+      beta.i.lambda <- beta.i[[document$a]][,document$d[1,],drop=FALSE]
+
+      document$l <- optim(par=document$l, fn=lhood, gr=grad,
                           method="BFGS", control=list(maxit=500),
                           doc.ct=document$d[2,], mu=mu.i,
                           siginv=siginv.in, beta=beta.i.lambda, Ndoc = document$nd)$par
-      if ("DIST_M" %in% mstep) {
+      if (mstage > 0) {
         list(document$dn, document)
       } else {
         document
@@ -129,24 +142,23 @@ estep.hpb <- function(
     sigma.ss <- diag(0, nrow=(K-1))
     lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
     
-    if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
+    if (mstage < 2) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
     sigmaentropy.in <- value(sigmaentropy.broadcast)
-    assertthat::assert_that(length(part) > 0)
+    assert_that(length(part) > 0)
     bound <- sapply(part, function(document) {
-      if ("DIST_M" %in% mstep) {
+      if (mstage > 0) {
         document <- document[[2]]
         mu.i <- document$mu.i
       } 
-      if ("Broadcast" %in% class(mu.distributed)) {
+      if (mstage < 2) {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
         } else {
           mu.i <- as.numeric(mu.in)
         }        
       }
-      eta <- document$l
       words <- document$d[1,]
 
       #Solve for Hessian/Phi/Bound returning the result
@@ -174,7 +186,7 @@ estep.hpb <- function(
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 2) x <- x[[2]]
     if (length(y) == 2) y <- y[[2]]
-    assertthat::assert_that(length(x) == 4, length(x) == length(y))
+    assert_that(length(x) == 4, length(x) == length(y))
       list(bd = rbind(x$bd, y$bd), 
            s = x$s + y$s, 
            b = merge.beta(x$b, y$b), 

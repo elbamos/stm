@@ -163,3 +163,7 @@ bigtest()
 # 2-stage nodistb 38cpu   e-step  142             m-step 53
 # -- distb uses lapply instead of mapValues, and A partitions
 # 2-stage distb 38cpu     e-step -             m-step 71
+# -- optimized distb using groupByKey and mapPartition - also added DIST_M infrastructure
+# 2-stage distb 38cpu     e-step  174             m-step  72
+# 2-stage distM 38cpu     e-step  166             m-step  52
+# -- switch distb to index on integers, estep to process dist_mu more quickly

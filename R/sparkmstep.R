@@ -15,7 +15,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
   thresh <- settings$tau$tol
   #Aggregate outcome data.
   
-  if (!fixedintercept) stop("Must use fixed intercept for distributed opt beta.")
+  assert_that(!fixedintercerpt)
   
   counts <- do.call(rbind,beta.ss)
   
@@ -90,13 +90,12 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
     coef <- sweep(coef, 2, 
                   STATS=m[i.start:(i.start + ncol(coef) - 1)], FUN="+")
     coef <- exp(coef)
-
     # want to split into one matrix per aspect.  First split into list of aspects, one vector each
     coef <- split(coef, rep(1:A, K)  )
 
     index <- 0
     lapply(coef, function(x) {
-      index <<- index + 1
+      index <<- as.integer(index + 1)
       list(aspect = index, 
            list(col = i.start, x = x))
     })
