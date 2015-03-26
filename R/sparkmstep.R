@@ -263,22 +263,54 @@ opt.mu.spark <- function(lambda, settings, mode=c("CTM","Pooled", "L1"), covar=N
   if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
   index <- 0
   # need to turn lambda into columns -- which is interesting since we need lambda to be rows for opt sigma
-  lambda.out <- apply(lambda, MARGIN=2, function(x) {
-    index <<- index + 1
-    list(index, x)
-  })
-  fn <- paste0(settings$mufile, round(rnorm(1) * 1000))
-  saveObjectFile(parallelize(settings$spark.context, lambda.out, settings$spark.partitions), fn)
-  lambda.rdd <- objectFile(spark.context, fn, settings$spark.partitions)
+  lambda.rdd <- NULL
+  if (! "RDD" %in% class(lambda)) {
+    lambda.out <- apply(lambda, MARGIN=2, function(x) {
+      index <<- index + 1
+      list(index, x)
+    })
+    fn <- paste0(settings$mufile, round(rnorm(1) * 1000))
+    saveObjectFile(parallelize(settings$spark.context, lambda.out, settings$spark.partitions), fn)
+    lambda.rdd <- objectFile(spark.context, fn, settings$spark.partitions)
+  } else {
+    # convert the hpb chunks into column chunks
+    lambda.rdd <- flatMap(lambda, function(x) {
+      l <- x[[2]]$l #all columns, some rows, first column is a row index
+      startrow <- l[1,1]
+      l <- l[,-1]
+      index <- 0
+      apply(l, MARGIN=2, function(y) {
+        index <<- index + 1
+        list(
+          as.integer(index), #column
+          list(
+            startrow = startrow, 
+            y
+          )
+        )
+      })
+    })
+    # combine the column chunks
+    lambda.rdd <- groupByKey(hpb.rdd)
+  }
+  
+  
+  
   covar <- settings$covar.broadcast
   
   mapPartitionsWithIndex(lambda.rdd, function(part) {
     covar.in <- value(covar)
-    lapply(part, simplify = TRUE, FUN = function(a.lambda)
-        list(a.lambda[[1]], 
-             covar %*% stm:::vb.variational.reg(Y=a.lambda[[2]], X = covar)
-        )
-    ) 
+    lapply(part, simplify = TRUE, FUN = function(a.lambda) {
+      colindex <- a.lambda[[1]]
+      if ("list" %in% class(a.lambda[[2]])) {
+        # combine column chunks into columns
+      } else {
+        column <- a.lambda[[2]]
+      }
+      list(colindex, 
+           covar %*% stm:::vb.variational.reg(Y=column, X = covar)
+      )
+    }) 
   })
 }
 

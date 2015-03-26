@@ -45,7 +45,7 @@ estep.lambda <- function(
         }        
       }
 
-      beta.i.lambda <- beta.i[[document$a]][,document$d[1,],drop=FALSE]
+      beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
 
       document$l <- optim(par=document$l, fn=lhood, gr=grad,
                           method="BFGS", control=list(maxit=500),
@@ -131,6 +131,15 @@ estep.hpb <- function(
   spark.context,
   spark.partitions,
   verbose) {
+  
+  mstage <- 0
+  if ("DIST_M" %in% mstep) {
+    if ("Broadcast" %in% class(mu.distributed)) {
+      mstage <- 1
+    } else {
+      mstage <- 2
+    }
+  }
   
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.

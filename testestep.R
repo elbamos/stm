@@ -3,6 +3,7 @@ library(dplyr)
 library(tm)
 library(slam)
 library(stringr)
+library(assertthat)
 
 library(lda)
 
@@ -148,22 +149,27 @@ cluster()
 bigtest()
 
 # using 19 m1.large instances
-# on one t2 instance      e-step 1200-1700        m-step 70
-# Vanilla                 e-step 252              m-step 52
+# on one t2 instance        e-step 1200-1700        m-step 70
+# Vanilla                   e-step 252              m-step 52
 # -- may have been a memory/storage thing going on here.  
-# 1-stage e-step          e-step 296              m-step 68
-# 1-stage e-step dist b   e-step 360              m-step 89
+# 1-stage e-step            e-step 296              m-step 68
+# 1-stage e-step dist b     e-step 360              m-step 89
 # -- memory seemed to clear up, not sure if it was because of a SparkR revision...
-# 1-stage e-step distb    e-step 284              m-step 90
-# 1-stage, nodistb, 38cpu e-step 155              m-step 82
+# 1-stage e-step distb      e-step 284              m-step 90
+# 1-stage, nodistb, 38cpu   e-step 155              m-step 82
 # -- more refining of distributed beta, 38 cpus
-# 1-stage distb 38cpu     e-step 156              m-step 84
+# 1-stage distb   38cpu     e-step 156              m-step 84
 # -- consolidating doc counts in documents.rdd, switch 1-2 stage, distm saves object file, sqrt(p) b partitions
-# 1-stage distb 38cpu     e-step  158             m-step 97
-# 2-stage nodistb 38cpu   e-step  142             m-step 53
+# 1-stage distb   38cpu     e-step  158             m-step 97
+# 2-stage nodistb 38cpu     e-step  142             m-step 53
 # -- distb uses lapply instead of mapValues, and A partitions
-# 2-stage distb 38cpu     e-step -             m-step 71
+# 2-stage distb   38cpu     e-step -                m-step 71
 # -- optimized distb using groupByKey and mapPartition - also added DIST_M infrastructure
-# 2-stage distb 38cpu     e-step  174             m-step  72
-# 2-stage distM 38cpu     e-step  166             m-step  52
+# 2-stage distb   38cpu     e-step  174             m-step  72
+# 2-stage distM   38cpu     e-step  166             m-step  52
 # -- switch distb to index on integers, estep to process dist_mu more quickly
+# 2-stage         38cpu     e-step  144             m-step  54
+# 2-stage distB   38cpu     e-step  176             m-step  75
+# 2-stage distM   38cpu     e-step  165             m-step  51
+# 2-stage distBM  38cpu     e-step  200             m-step  66 -- Note, this converged, which means something isn't
+#                                                                 calculating right
