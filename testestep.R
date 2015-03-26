@@ -28,11 +28,10 @@ library(SparkR)
 #
 
 doDebug <- FALSE
-mstep <- NULL# c("DIST_M")#, "DIST_M") # "DIST_M"
+mstep <- "DIST_B"# c("DIST_M")#, "DIST_M") # "DIST_M"
 estages <- 2
 reduction <-NULL #"COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
-# COLLECT and
-# COLLECT PARTITIONS
+
 # COUNT and COLLECT -- 
 # COLLECT ALONE -- 
 # REPARTITION -- 
@@ -141,12 +140,12 @@ bigtest <- function() {
   )
 }
 
-local()
-#cluster()
+#local()
+cluster()
 
-smalltest()
+#smalltest()
 # mediumtest()
-#bigtest()
+bigtest()
 
 # using 19 m1.large instances
 # on one t2 instance      e-step 1200-1700        m-step 70

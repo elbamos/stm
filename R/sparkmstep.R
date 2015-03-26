@@ -84,10 +84,9 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
 #    coef <- do.call(cbind,map.out)
     coef <- covar.in %*% coef # should have one column for each vocab in input, and rows = nrow(covar.in)
                               # there should be A*K rows
-    if (nrow(coef) != A*K) stop("Coef AK Error")
+    assert_that(nrow(coef) == A*K)
 
     coef <- matrix(coef)
-
     coef <- sweep(coef, 2, 
                   STATS=m[i.start:(i.start + ncol(coef) - 1)], FUN="+")
     coef <- exp(coef)
@@ -103,26 +102,22 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
     })
   })
   
-  mnreg.rdd <- combineByKey(mnreg.rdd, createCombiner = function(v) {
-    C <- matrix(rep(0, V * K), nrow = K)
-    x <- matrix(v[[2]], nrow = K)
-    C[,v[[1]]:(v[[1]] + ncol(x-1) - 1) ] <- x
-    C
-  }, mergeValue = function(C, v) {
-    x <- matrix(v[[2]], nrow = K)
-    C[,v[[1]]:(v[[1]] + ncol(x)-1) ] <- x
-    C
-  }, mergeCombiners = `+`, 
-  as.integer(A)
-  ) 
+  mnreg.rdd <- groupByKey(mnreg.rdd, as.integer(A))
+  mnreg.rdd <- mapPartitionsWithIndex(mnreg.rdd, function(split, part) {
+    lapply(part, function(x) {
+      aspect <- x[[1]]
+      C <- matrix(rep(0, V * K), nrow = K)
+      lapply(x[[2]], function(v) {
+        y <- matrix(v[[2]], nrow = K)
+        C[,v[[1]]:(v[[1]] + ncol(y) - 1) ] <<- y
+      })
+      list(aspect, C/rowSums(C))
+    })
+  })
   
-#    mnreg.rdd <- mapValues(mnreg.rdd, function(x) {
-#      x <- x / rowSums(x)
-#    })
+  # We're collecting this only so we can broadcast it again because we haven't figured out a memory-efficient
+  # way to join beta.rdd and documents.rdd.  
   beta <- collectAsMap(mnreg.rdd)
-  beta <- lapply(beta, function(x) { x / rowSums(x)})
-#  beta <- lapply(beta, function(x) {x / rowSums(x)})
-  # beta calculates, but beta is a key,value pair list, not just a list now
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
   
   list(beta = beta, nlambda=nlambda, beta.distributed = beta.distributed)
@@ -282,7 +277,7 @@ opt.mu.spark <- function(lambda, settings, mode=c("CTM","Pooled", "L1"), covar=N
     covar.in <- value(covar)
     lapply(part, simplify = TRUE, FUN = function(a.lambda)
         list(a.lambda[[1]], 
-             covar %*% vb.variational.reg(Y=a.lambda[[2]], X = covar)
+             covar %*% stm:::vb.variational.reg(Y=a.lambda[[2]], X = covar)
         )
     ) 
   })
@@ -301,10 +296,14 @@ opt.sigma.spark <- function(sigma.ss, lambda, mu, settings) {
   onecol <- FALSE # is mu only 1 column?
   if (onecol) {
     covariance <- mapValues(lambda, function(x) {
+      # This could easily be converted to run off of either documents.rdd or hpb.rdd.  Probably hpb, since
+      # then we could partition by index
       x - as.numeric(mu)
     })
   } else {
     covariance.rdd <- join(lambda, mu, spark.partitions = as.integer(settings$spark.partitions))
+    # This has to be run off of documents.rdd, or hpb.rdd has to be split into rows.  Because mu is
+    # separate columns.
     covariance.rdd <- mapValues(covariance.rdd, function(x) {x[[1]] - x[[2]]})
   } 
   covar.cells.rdd <- mapPartitions(covariance.rdd, function(part) {
@@ -358,62 +357,6 @@ opt.sigma.spark <- function(sigma.ss, lambda, mu, settings) {
   return(sigma)
 }
 
-#Variational Linear Regression with a Half-Cauchy hyperprior 
-# (Implementation based off the various LMM examples from Matt Wand)
-# This code is intended to be passed a Matrix object
-vb.variational.reg <- function(Y,X, b0=1, d0=1) {
-  Xcorr <- crossprod(X)
-  XYcorr <- crossprod(X,Y) 
-  
-  an <- (1 + nrow(X))/2
-  D <- ncol(X)
-  N <- nrow(X)
-  w <- rep(0, ncol(X))
-  error.prec <- 1 #expectation of the error precision
-  converge <- 1000
-  cn <- ncol(X) # - 1 for the intercept and +1 in the update cancel
-  dn <- 1
-  Ea <- cn/dn #expectation of the precision on the weights
-  ba <- 1
-  
-  while(converge>.0001) {
-    w.old <- w
-    
-    #add the coefficient prior.  Form depends on whether X is a Matrix object or a regular matrix.
-    if(is.matrix(X)) {
-      ppmat <- diag(x=c(0, rep(as.numeric(Ea), (D-1))),nrow=D) 
-    } else {
-      ppmat <- Diagonal(n=D, x=c(0, rep(as.numeric(Ea), (D-1))))
-    }
-    invV <- error.prec*Xcorr + ppmat
-    #if its a plain matrix its faster to use the cholesky, otherwise just use solve
-    if(is.matrix(invV)) {
-      V <- chol2inv(chol(invV))
-    } else {
-      #Matrix package makes this faster even when its non-sparse
-      V <- solve(invV)     
-    }
-    w <- error.prec*V%*%XYcorr
-    
-    # parameters of noise model (an remains constant)
-    sse <- sum((X %*% w - Y)^ 2)
-    bn <- .5*(sse + sum(diag(Xcorr%*%V))) + ba
-    error.prec <- an/bn
-    ba <- 1/(error.prec + b0)
-    
-    #subtract off the intercept while working out the hyperparameters
-    # for the coefficients
-    w0 <- w[1]
-    w <- w[-1]
-    da <- 2/(Ea + d0)
-    dn <- 2*da + (crossprod(w) + sum(diag(V)[-1]))
-    Ea <- cn / dn
-    #now combine the intercept back in 
-    w <- c(w0,w)
-    converge <- sum(abs(w-w.old))
-  }
-  return(w)
-}
 
 
 

@@ -53,33 +53,9 @@ hpb.combiner <- function(part.rdd) {
     toss <- SparkR::count(part.rdd)
     print("count")
   }
-  # try to combine using an intermediate step
-  if ("KEY" %in% reduction) { # turn this on when we understand it better
-    part.rdd <- reduceByKey(part.rdd, function(x, y) {
-      if (length(x) == 4 && length(y) == 4) {
-        list(bd = rbind(x$bd, y$bd), 
-             s = x$s + y$s, 
-             b = merge.beta(x$b, y$b), 
-             l = rbind(x$l, y$l)
-        )
-      } else { 
-        stop(paste("bad key reduction match",
-                   str(x),
-                   str(y))
-        )
-      }
-    }, 
-    numPartitions = as.integer(sqrt(spark.partitions))
-    )
-    print("Done reducing by key")
-  }
   if ("COMBINE" %in% reduction) {
-    print("combining")
-    part <- numPartitions(part.rdd)
-    print(paste("partitions before combining ", part))
     part.rdd <- combineByKey(part.rdd, createCombiner = function(v) v, 
                              mergeValue = function(C, v) {
-                               print("merge value")
                                list(
                                  bd = rbind(C$bd, v$bd), 
                                  s = C$s + v$s, 
@@ -88,7 +64,6 @@ hpb.combiner <- function(part.rdd) {
                                )
                              },
                              mergeCombiners = function(C1, C2) {
-                               print("merge combiners")
                                list(
                                  bd = rbind(C1$bd, C2$bd), 
                                  s = C1$s + C2$s, 
@@ -98,16 +73,10 @@ hpb.combiner <- function(part.rdd) {
                              },
                              numPartitions = as.integer(sqrt(spark.partitions))
     )
-    print("done combining")
-    part <- numPartitions(part.rdd)
-    print(paste("partitions after combining ", part))
   }
+  # This would not be bad if it knew how many cpus there were per node
   if ("REPARTITION" %in% reduction) {
-    print("repartitioning")
-    part <- numPartitions(part.rdd) 
-    print(paste("before repartitioning ", part))
-    part.rdd <- partitionBy(part.rdd, numPartitions = as.integer(sqrt(part)))
-    print("repartitioned, now collapsing")
+    part.rdd <- coalesce(part.rdd, numPartitions = as.integer(sqrt(part)))
     part.rdd <- mapPartitionsWithIndex(part.rdd, function (split, part) {
       out <- part[[1]][[2]]
       for (index in 2:length(part)) {
@@ -120,22 +89,19 @@ hpb.combiner <- function(part.rdd) {
       }
       list(list(split, out))
     })
-    print("collapsed")
   }
-  if ("COLLECT" %in% reduction) {
-    print("Collecting")
-    toss <- collect(part.rdd)
-    print("Done collecting")
-  }
-  if ("COLLECTPARTITION" %in% reduction) {
-    print("collecting partitions - counting")
-    j <- numPartitions(part.rdd)
-    print("counted")
-    for (i in 0:(j-1)) {
-      print(i)
-      toss <- collectPartition(part.rdd, as.integer(i))
-    }
-    print("collected")
+  # try to combine using an intermediate step
+  if ("KEY" %in% reduction) { # turn this on when we understand it better
+    part.rdd <- reduceByKey(part.rdd, function(x, y) {
+      assert_that(length(x) == 4, length(x) == length(y))
+        list(bd = rbind(x$bd, y$bd), 
+             s = x$s + y$s, 
+             b = merge.beta(x$b, y$b), 
+             l = rbind(x$l, y$l)
+        )
+    }, 
+    numPartitions = as.integer(sqrt(spark.partitions))
+    )
   }
   part.rdd
 }
