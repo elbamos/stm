@@ -130,6 +130,10 @@ stm.control.spark <- function(documents, vocab, settings, model,
     settings$m.broadcast <- broadcast(spark.context, m)
     settings$m <- m
   }
+  X <-  settings$covariates$X
+  settings$X.broadcast <- broadcast(spark.context, X)
+  settings$spark.partitions <- spark.partitions
+  
   if (doDebug) print("Distributed initial rdd's")
   ############
   #Step 2: Run EM
@@ -194,9 +198,19 @@ stm.control.spark <- function(documents, vocab, settings, model,
 
     lambda <- estep.output$l
     if (estages == 1) lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
-    mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
+    if ("DIST_M" %in% mstep) {
+      if ("RDD" %in% class(mu.distributed)) unpersist(mu.distributed)
+      mu.distributed <- opt.mu.spark(lambda, mode = settings$gamma$mode, settings)
+      persist(mu.distrinbuted, spark.persistence)
+      mu.local <- collectAsMap(mu.distributed)
+      mu.local <- do.call(cbind, mu.local)
+      mu.local <- t(mu.local)
+      mu.local <- list(mu = mu.local)
+    } else {
+        mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
                            covar=settings$covariates$X, settings$gamma$enet)
-    mu.distributed <- distribute.mu(mu.local, spark.context, spark.partitions, settings)
+        mu.distributed <- distribute.mu(mu.local, spark.context, spark.partitions, settings)
+    }
     sigma.ss <- estep.output$s
     sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                              mu=mu.local$mu, sigprior=settings$sigma$prior)

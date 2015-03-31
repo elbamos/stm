@@ -15,7 +15,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,settings, spark.context, spark.p
   thresh <- settings$tau$tol
   #Aggregate outcome data.
   
-  assert_that(!fixedintercerpt)
+#  assert_that(!fixedintercerpt)
   
   counts <- do.call(rbind,beta.ss)
   
@@ -257,20 +257,23 @@ mnreg.spark <- function(beta.ss,settings, spark.context, spark.partitions) {
 # This function has not been tested - there's no point until we have a viable theory of how to do 
 # opt sigma in the cluster, which as of now we don't.  
 #
-opt.mu.spark <- function(lambda, settings, mode=c("CTM","Pooled", "L1"), covar=NULL, enet=NULL) {
-  mode <- settings$gamma$mode
-  if (mode == "L1") return(stm:::opt.mu(lambda, mode, covar, enet))
-  if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
+opt.mu.spark <- function(lambda, mode=c("CTM","Pooled", "L1"), settings) {
+#   if (mode == "L1") return(stm:::opt.mu(lambda, mode, covar, enet))
+#   if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
   index <- 0
   # need to turn lambda into columns -- which is interesting since we need lambda to be rows for opt sigma
   lambda.rdd <- NULL
   if (! "RDD" %in% class(lambda)) {
     lambda.out <- apply(lambda, MARGIN=2, function(x) {
       index <<- index + 1
-      list(index, x)
+      list(as.integer(index), x)
     })
     fn <- paste0(settings$mufile, round(rnorm(1) * 1000))
-    saveObjectFile(parallelize(settings$spark.context, lambda.out, settings$spark.partitions), fn)
+    print("to parallel")
+    print(str(lambda.out))
+    lambda.rdd <- parallelize(settings$spark.context, lambda.out)
+    print("in parallel")
+    saveAsObjectFile(lambda.rdd, fn)
     lambda.rdd <- objectFile(spark.context, fn, settings$spark.partitions)
   } else {
     # convert the hpb chunks into column chunks
@@ -294,13 +297,11 @@ opt.mu.spark <- function(lambda, settings, mode=c("CTM","Pooled", "L1"), covar=N
     lambda.rdd <- groupByKey(hpb.rdd)
   }
   
+  covar <- settings$X.broadcast
   
-  
-  covar <- settings$covar.broadcast
-  
-  mapPartitionsWithIndex(lambda.rdd, function(part) {
+  mapPartitionsWithIndex(lambda.rdd, function(split, part) {
     covar.in <- value(covar)
-    lapply(part, simplify = TRUE, FUN = function(a.lambda) {
+    lapply(part, function(a.lambda) {
       colindex <- a.lambda[[1]]
       if ("list" %in% class(a.lambda[[2]])) {
         # combine column chunks into columns
@@ -308,7 +309,7 @@ opt.mu.spark <- function(lambda, settings, mode=c("CTM","Pooled", "L1"), covar=N
         column <- a.lambda[[2]]
       }
       list(colindex, 
-           covar %*% stm:::vb.variational.reg(Y=column, X = covar)
+           covar.in %*% vb.variational.reg(Y=column, X = covar.in)
       )
     }) 
   })
