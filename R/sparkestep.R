@@ -129,8 +129,10 @@ estep.hpb <- function(
     startrow <- as.integer(lambda[1,1])
     betaout <- apply(beta.ss, MARGIN=2, FUN= function(x) {
       index <<- index + 1
-      list(as.integer(index), list(startrow, x))
+      if (sum(x) == 0) {NULL} 
+      else {list(as.integer(index), x)}
     })
+    betaout <- Filter(Negate(is.null), betaout)
 #    index <- as.integer(split/sqrt(spark.partitions))
     list(list(key = "output", list(
       s = sigma.ss, 

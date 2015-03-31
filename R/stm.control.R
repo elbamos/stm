@@ -211,7 +211,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
     }  else {
       if(settings$tau$mode=="L1") {
 
-        beta <- mnreg.spark.distributedbeta(estep.output$b, estep.output$br, settings, spark.context, spark.partitions)
+        beta <- mnreg.spark.distributedbeta(estep.output$hpb.rdd, estep.output$br, settings, spark.context, spark.partitions)
 
         beta.distributed <- beta$beta.distributed
       } else {

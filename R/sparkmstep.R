@@ -1,6 +1,6 @@
 # This implementation doesn't work right now.  The concept is to move some of the post-glmnet processing of
 # opt beta out into the cluster.
-mnreg.spark.distributedbeta <- function(beta.ss,br, settings, spark.context, spark.partitions) {
+mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spark.partitions) {
   #Parse Arguments
   A <- settings$dim$A
   K <- settings$dim$K
@@ -17,7 +17,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,br, settings, spark.context, spa
   
 #  assert_that(!fixedintercerpt)
   
-  counts <- beta.ss
+ # counts <- beta.ss
   
   covar.broadcast <- settings$covar.broadcast
   m.broadcast <- settings$m.broadcast
@@ -29,37 +29,41 @@ mnreg.spark.distributedbeta <- function(beta.ss,br, settings, spark.context, spa
   # it is cheaper to re-distribute counts as an RDD each pass through the loop than it would be to 
   # convert the matrix from rows to columns.  This is something potentially worth revisiting
   # for very large data sets.
-  counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
-  index <- 0
-  counts.list <- lapply(counts, function(x) {
-    index <<- index + 1
-    list(
-      t = index, 
-      c.i = x#, 
-      #      m.i = ifelse(is.null(m), NULL, m[index])
-    )
-  })
-  bf <- paste0(settings$betafile, round(rnorm(1) * 10000))
-  saveAsObjectFile(parallelize(spark.context, counts.list, spark.partitions), bf)
-  counts.rdd <- objectFile(spark.context, bf, spark.partitions)
-  rm(counts.list)
+#   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
+#   index <- 0
+#   counts.list <- lapply(counts, function(x) {
+#     index <<- index + 1
+#     list(
+#       t = index, 
+#       c.i = x#, 
+#       #      m.i = ifelse(is.null(m), NULL, m[index])
+#     )
+#   })
+#   bf <- paste0(settings$betafile, round(rnorm(1) * 10000))
+#   saveAsObjectFile(parallelize(spark.context, counts.list, spark.partitions), bf)
+#   counts.rdd <- objectFile(spark.context, bf, spark.partitions)
+#   rm(counts.list)
+  
+  counts.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "betacolumns"), 
+                                   function(x) x[[2]]), as.integer(spark.partitions))
   
   #########
   #Distributed Poissons
   #########
-
+  
   verbose <- settings$verbose
   
   mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
     # each part should be a column from counts, representing a single vocabulary term
     offset.in <- value(offset.broadcast)
     covar.in <- value(covar.broadcast)
-    i.start <- part[[1]]$t
+    i.start <- part[[1]][[1]]
     m <- value(m.broadcast)
     
     coef <- sapply(part, USE.NAMES=FALSE,simplify=TRUE,function(a.count) {
-      i <- a.count$t
-      counts.i <- a.count$c.i
+      i <- a.count[[1]]
+      counts.i <- Reduce("+", a.count[[2]], rep(0, A*K))
+
       offset2 <- m[i] + offset.in
       
       mod <- NULL
@@ -87,6 +91,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,br, settings, spark.context, spa
     assert_that(nrow(coef) == A*K)
 
     coef <- matrix(coef)
+
     coef <- sweep(coef, 2, 
                   STATS=m[i.start:(i.start + ncol(coef) - 1)], FUN="+")
     coef <- exp(coef)
@@ -118,7 +123,7 @@ mnreg.spark.distributedbeta <- function(beta.ss,br, settings, spark.context, spa
   # way to join beta.rdd and documents.rdd.  
   beta <- collectAsMap(mnreg.rdd)
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
-  
+  unpersist(hpb.rdd)
   list(beta = beta, nlambda=nlambda, beta.distributed = beta.distributed)
 }
 
