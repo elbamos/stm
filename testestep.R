@@ -76,11 +76,11 @@ smalltest <- function() {
   results <- stm(documents = prep$documents,
                  vocab = prep$vocab,
                  data = prep$meta, 
-                 max.em.its = 3, 
+                 max.em.its = 5, 
                  content = ~treatment,
                  prevalence = ~ pid_rep + MetaID,
                  init.type= "Spectral", #control = list(nits=50, burnin=25, alpha=(50/20), eta=.01),
-                 K = 20, spark.context = spark.context, 
+                 K = 50, spark.context = spark.context, 
                  spark.partitions = 4, 
                  spark.filename = filepath
   )

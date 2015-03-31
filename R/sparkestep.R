@@ -85,7 +85,7 @@ estep.hpb <- function(
   
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
-  part.rdd <- mapPartitionsWithIndex(documents.rdd, function(split,part) {
+  hpb.rdd <- mapPartitionsWithIndex(documents.rdd, function(split,part) {
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
@@ -125,18 +125,27 @@ estep.hpb <- function(
     })
     beta.ss <- do.call(rbind, beta.ss)
     br <- rowSums(beta.ss)
-    index <- as.integer(split/sqrt(spark.partitions))
-    list(list(key = index, list(
+    index <- 0
+    startrow <- as.integer(lambda[1,1])
+    betaout <- apply(beta.ss, MARGIN=2, FUN= function(x) {
+      index <<- index + 1
+      list(as.integer(index), list(startrow, x))
+    })
+#    index <- as.integer(split/sqrt(spark.partitions))
+    list(list(key = "output", list(
       s = sigma.ss, 
       b = beta.ss, 
       bd = sum(bound),
       br = br,
       l = lambda
-    )))
+    )), 
+    list(key = "betacolumns", betaout))
   })
 
   # merge the sufficient stats generated for each partition
-  out <- reduce(part.rdd, function(x, y) {
+  cache(hpb.rdd)
+  output.rdd <- filterRDD(hpb.rdd, function(x) x[[1]] == "output")
+  out <- reduce(output.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 2) x <- x[[2]]
@@ -152,5 +161,6 @@ estep.hpb <- function(
 
   lambda <- out$l[order(out$l[,1]),]
   out$l <- lambda[,-1]
+  out$hpb.rdd <- hpb.rdd
   out
 }

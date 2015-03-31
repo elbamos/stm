@@ -174,7 +174,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
         spark.context,
         spark.partitions,
         verbose)
-      unpersist(old)
+
     
 
     if(verbose) {
@@ -231,8 +231,9 @@ stm.control.spark <- function(documents, vocab, settings, model,
     # The report function won't work properly if there's no content covariate because beta hasn't been recovered
     if(!stopits & verbose) stm:::report(convergence, ntokens=ntokens, beta, vocab, 
                                         settings$topicreportevery, verbose)
+    unpersist(old)
   }
-  unpersist(documents.rdd)
+
   
   #######
   #Step 3: Construct Output
