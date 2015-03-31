@@ -151,21 +151,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
       print("mu is an rdd")
       documents.rdd <- join(documents.rdd, mu.distributed, as.integer(spark.partitions))
     }
-    if (estages == 1) {
-      estep.output <- estep.spark(
-        documents.rdd = documents.rdd,
-        A = settings$dim$A,
-        K = settings$dim$K,
-        V = length(vocab),
-        beta.distributed = beta.distributed,
-        mu = mu.distributed, 
-        lambda.distributed = lambda.distributed,
-        siginv.broadcast = siginv.broadcast,
-        sigmaentropy.broadcast = sigmaentropy.broadcast,
-        spark.context = spark.context,
-        spark.partitions = spark.partitions,
-        verbose)
-    } else {
+
       old <- documents.rdd
       documents.rdd <- estep.lambda( 
         documents.rdd,
@@ -189,7 +175,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
         spark.partitions,
         verbose)
       unpersist(old)
-    }
+    
 
     if(verbose) {
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
@@ -224,11 +210,9 @@ stm.control.spark <- function(documents, vocab, settings, model,
       beta$beta.distributed <- beta.distributed
     }  else {
       if(settings$tau$mode=="L1") {
-        if ("DIST_B" %in% mstep){
-          beta <- mnreg.spark.distributedbeta(estep.output$b, settings, spark.context, spark.partitions)
-        } else {  
-          beta <- mnreg.spark(estep.output$b, settings, spark.context, spark.partitions)
-        }
+
+        beta <- mnreg.spark.distributedbeta(estep.output$b, estep.output$br, settings, spark.context, spark.partitions)
+
         beta.distributed <- beta$beta.distributed
       } else {
         beta <- stm:::jeffreysKappa(estep.output$b, kappa, settings) 
