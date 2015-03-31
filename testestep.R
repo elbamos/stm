@@ -84,7 +84,7 @@ smalltest <- function() {
                  spark.partitions = 4, 
                  spark.filename = filepath
   )
-}
+} 
 mediumtest <- function() {
   data(poliblog5k)
   documents <- poliblog5k.docs
