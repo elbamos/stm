@@ -13,14 +13,12 @@ estep.lambda <- function(
   # If mu is not being turned into an rdd, use 0.  If mu is being turned into an rdd,
   # it will still be broadcast on the first iteration so use 1.  If its already an rdd, use 2. 
   #
-  mstage <- 0
-  if ("DIST_M" %in% mstep) {
+
     if ("Broadcast" %in% class(mu.distributed)) {
       mstage <- 1
     } else {
       mstage <- 2
     }
-  }
   
   mapPartitionsWithIndex(documents.rdd, function(split, part) {
     
@@ -75,13 +73,13 @@ estep.hpb <- function(
   verbose) {
   
   mstage <- 0
-  if ("DIST_M" %in% mstep) {
+
     if ("Broadcast" %in% class(mu.distributed)) {
       mstage <- 1
     } else {
       mstage <- 2
     }
-  }
+
   
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
@@ -133,6 +131,12 @@ estep.hpb <- function(
       else {list(as.integer(index), x)}
     })
     betaout <- Filter(Negate(is.null), betaout)
+    index <- 0
+    ll <- lambda[,2:ncol(lambda)]
+    lambdaout <- apply(ll, MARGIN=2, FUN=function(x) {
+      index <<- index + 1
+      list(as.integer(index), list(lambda[,1], x))
+    })
 #    index <- as.integer(split/sqrt(spark.partitions))
     list(list(key = "output", list(
       s = sigma.ss, 
@@ -140,7 +144,8 @@ estep.hpb <- function(
       br = br,
       l = lambda
     )), 
-    list(key = "betacolumns", betaout))
+    list(key = "betacolumns", betaout), 
+    list(key = "lambdacolumns", lambdaout))
   })
 
   # merge the sufficient stats generated for each partition

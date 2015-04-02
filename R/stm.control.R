@@ -58,25 +58,14 @@ stm.control.spark <- function(documents, vocab, settings, model,
   index <- 0
   doclist <- lapply(documents, FUN = function(x) {
     index <<- index + 1
-    list( 
+    list(as.integer(index), list( 
       dn = as.integer(index),
       d = x,
       a = as.integer(betaindex[index]),
-      nd = sum(x[2,])
-  )
+      nd = sum(x[2,]),
+      l = lambda[index,]
+  ))
   })
-  if (estages == 2) {
-    doclist <- lapply(doclist, FUN = function(x) {
-      x$l <- lambda[x$dn,]
-      x
-    })
-  }
-
-  if ("DIST_M" %in% mstep) { # need to turn this into a K,V pair RDD
-    doclist <- lapply(doclist, FUN=function(x) {
-      list(x$dn, x)
-    })
-  }
 
   # documents.rdd is a value list (not a pair list).  Each iteration, 
   # the e-step runs logisticnormal inside mapPartitionsAsIndex to update lambda.
@@ -138,6 +127,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
   ############
   #Step 2: Run EM
   ############
+  hpb.rdd <- NULL
   while(!stopits) {
     t1 <- proc.time()
     cat("Beginning E-Step\t")
@@ -147,12 +137,12 @@ stm.control.spark <- function(documents, vocab, settings, model,
     siginv <- solve(sigma)
     siginv.broadcast <- broadcast(spark.context, siginv)
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
-    if ("DIST_M" %in% mstep && ! "Broadcast" %in% class(mu.distributed)) {
+    old <- documents.rdd
+    if (! "Broadcast" %in% class(mu.distributed)) {
       print("mu is an rdd")
       documents.rdd <- join(documents.rdd, mu.distributed, as.integer(spark.partitions))
     }
 
-      old <- documents.rdd
       documents.rdd <- estep.lambda( 
         documents.rdd,
         beta.distributed,
@@ -162,6 +152,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
         spark.partitions,
         verbose)
       persist(documents.rdd, spark.persistence)
+
       estep.output <- estep.hpb( 
         length(vocab), 
         settings$dim$K,
@@ -174,7 +165,8 @@ stm.control.spark <- function(documents, vocab, settings, model,
         spark.context,
         spark.partitions,
         verbose)
-
+      if (! is.null(hpb.rdd)) unpersist(hpb.rdd)
+      hpb.rdd <- estep.output$hpb.rdd
     
 
     if(verbose) {
@@ -183,20 +175,19 @@ stm.control.spark <- function(documents, vocab, settings, model,
     }
 
     lambda <- estep.output$l
-    if (estages == 1) lambda.distributed <- distribute.lambda(lambda, spark.context, spark.partitions)
-    if ("DIST_M" %in% mstep) {
+
       if ("RDD" %in% class(mu.distributed)) unpersist(mu.distributed)
-      mu.distributed <- opt.mu.spark(lambda, mode = settings$gamma$mode, settings)
-      persist(mu.distrinbuted, spark.persistence)
+      mu.distributed <- opt.mu.spark(hpb.rdd, mode = settings$gamma$mode, settings)
+      persist(mu.distributed, spark.persistence)
       mu.local <- collectAsMap(mu.distributed)
       mu.local <- do.call(cbind, mu.local)
       mu.local <- t(mu.local)
       mu.local <- list(mu = mu.local)
-    } else {
-        mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
-                           covar=settings$covariates$X, settings$gamma$enet)
-        mu.distributed <- distribute.mu(mu.local, spark.context, spark.partitions, settings)
-    }
+
+#         mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
+#                            covar=settings$covariates$X, settings$gamma$enet)
+#         mu.distributed <- distribute.mu(mu.local, spark.context, spark.partitions, settings)
+
     sigma.ss <- estep.output$s
     sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
                              mu=mu.local$mu, sigprior=settings$sigma$prior)
@@ -211,7 +202,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
     }  else {
       if(settings$tau$mode=="L1") {
 
-        beta <- mnreg.spark.distributedbeta(estep.output$hpb.rdd, estep.output$br, settings, spark.context, spark.partitions)
+        beta <- mnreg.spark.distributedbeta(hpb.rdd, estep.output$br, settings, spark.context, spark.partitions)
 
         beta.distributed <- beta$beta.distributed
       } else {
