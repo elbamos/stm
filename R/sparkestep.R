@@ -126,7 +126,7 @@ estep.hpb <- function(
     beta.ss <- do.call(rbind, beta.ss)
     br <- rowSums(beta.ss)
     index <- 0
-    startrow <- as.integer(lambda[1,1])
+#    startrow <- as.integer(lambda[1,1])
     betaout <- apply(beta.ss, MARGIN=2, FUN= function(x) {
       index <<- index + 1
       if (sum(x) == 0) {NULL} 
@@ -136,7 +136,6 @@ estep.hpb <- function(
 #    index <- as.integer(split/sqrt(spark.partitions))
     list(list(key = "output", list(
       s = sigma.ss, 
-      b = beta.ss, 
       bd = sum(bound),
       br = br,
       l = lambda
@@ -152,10 +151,9 @@ estep.hpb <- function(
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 2) x <- x[[2]]
     if (length(y) == 2) y <- y[[2]]
-    assert_that(length(x) == 5, length(x) == length(y))
+    assert_that(length(x) == 4, length(x) == length(y))
       list(bd = x$bd + y$bd, 
            s = x$s + y$s, 
-           b = x$b + y$b, 
            l = rbind(x$l, y$l), 
            br = x$br + y$br
       )

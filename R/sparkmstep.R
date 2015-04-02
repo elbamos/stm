@@ -57,11 +57,12 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
     # each part should be a column from counts, representing a single vocabulary term
     offset.in <- value(offset.broadcast)
     covar.in <- value(covar.broadcast)
-    i.start <- part[[1]][[1]]
+    colidxs <- list()
     m <- value(m.broadcast)
     
     coef <- sapply(part, USE.NAMES=FALSE,simplify=TRUE,function(a.count) {
       i <- a.count[[1]]
+      colidxs <<- c(colidxs, i)
       counts.i <- Reduce("+", a.count[[2]], rep(0, A*K))
 
       offset2 <- m[i] + offset.in
@@ -90,19 +91,19 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
                               # there should be A*K rows
     assert_that(nrow(coef) == A*K)
 
-    coef <- matrix(coef)
-
+#    coef <- matrix(coef)
+    colidxs <- unlist(colidxs)    
     coef <- sweep(coef, 2, 
-                  STATS=m[i.start:(i.start + ncol(coef) - 1)], FUN="+")
+                  STATS=m[colidxs], FUN="+")
     coef <- exp(coef)
     # want to split into one matrix per aspect.  First split into list of aspects, one vector each
-    coef <- split(coef, rep(1:A, K)  )
+    coef <- split(coef, rep(1:A, each = K)  )
 
     index <- 0
     lapply(coef, function(x) {
       index <<- as.integer(index + 1)
       list(aspect = index, 
-           list(col = i.start, x = x))
+           list(col = colidxs, x = x))
     })
   })
   
@@ -112,8 +113,8 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
       aspect <- x[[1]]
       C <- matrix(rep(0, V * K), nrow = K)
       lapply(x[[2]], function(v) {
-        y <- matrix(v[[2]], nrow = K)
-        C[,v[[1]]:(v[[1]] + ncol(y) - 1) ] <<- y
+#        y <- matrix(v[[2]], nrow = K)
+        C[,v[[1]] ] <<- v[[2]]
       })
       list(aspect, C/rowSums(C))
     })
