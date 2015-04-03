@@ -128,7 +128,10 @@ stm.control.spark <- function(documents, vocab, settings, model,
   #Step 2: Run EM
   ############
   hpb.rdd <- NULL
+  iteration <- 0
   while(!stopits) {
+    iteration <<- iteration + 1
+    settings$iteration <- broadcast(spark.context, iteration)
     t1 <- proc.time()
     cat("Beginning E-Step\t")
     
@@ -139,7 +142,6 @@ stm.control.spark <- function(documents, vocab, settings, model,
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
     old <- documents.rdd
     if (! "Broadcast" %in% class(mu.distributed)) {
-      print("mu is an rdd")
       documents.rdd <- join(documents.rdd, mu.distributed, as.integer(spark.partitions))
     }
 
@@ -150,6 +152,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
         siginv.broadcast,
         spark.context,
         spark.partitions,
+        settings,
         verbose)
       persist(documents.rdd, spark.persistence)
 
@@ -179,10 +182,13 @@ stm.control.spark <- function(documents, vocab, settings, model,
       if ("RDD" %in% class(mu.distributed)) unpersist(mu.distributed)
       mu.distributed <- opt.mu.spark(hpb.rdd, mode = settings$gamma$mode, settings)
       persist(mu.distributed, spark.persistence)
+#      mu.local <- getmu(mu.distributed, settings$dim$N)
       mu.local <- collectAsMap(mu.distributed)
-      mu.local <- do.call(cbind, mu.local)
+      mu.local <- do.call(rbind, mu.local) # note - only for testing; produces wrong answer because rows out of order
       mu.local <- t(mu.local)
+
       mu.local <- list(mu = mu.local)
+
 
 #         mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
 #                            covar=settings$covariates$X, settings$gamma$enet)
@@ -222,7 +228,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
     # The report function won't work properly if there's no content covariate because beta hasn't been recovered
     if(!stopits & verbose) stm:::report(convergence, ntokens=ntokens, beta, vocab, 
                                         settings$topicreportevery, verbose)
-    unpersist(old)
+    #unpersist(old)
   }
 
   

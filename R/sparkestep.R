@@ -7,6 +7,7 @@ estep.lambda <- function(
   siginv.broadcast,
   spark.context,
   spark.partitions,
+  settings,
   verbose) {
   
   #
@@ -19,9 +20,10 @@ estep.lambda <- function(
     } else {
       mstage <- 2
     }
+  iteration <- settings$iteration
+  K <- settings$dim$K
   
   mapPartitionsWithIndex(documents.rdd, function(split, part) {
-    
     if (mstage < 2) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
@@ -42,7 +44,9 @@ estep.lambda <- function(
           mu.i <- as.numeric(mu.in)
         }        
       }
-
+      assert_that(length(mu.i) == K - 1)
+#      if (value(iteration) == 1) stop(mu.i)
+      
       beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
 
       document$l <- optim(par=document$l, fn=lhood, gr=grad,

@@ -147,29 +147,48 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 #   if (mode == "L1") return(stm:::opt.mu(lambda, mode, covar, enet))
 #   if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
   N <- settings$dim$N
+  K <- settings$dim$K
   # need to turn lambda into columns -- which is interesting since we need lambda to be rows for opt sigma
   lambda.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "lambdacolumns"), 
                      function(x) x[[2]]), as.integer(settings$spark.partitions))
   
   covar <- settings$X.broadcast
   
-  mapPartitionsWithIndex(lambda.rdd, function(split, part) {
+  mu.rdd <- mapPartitionsWithIndex(lambda.rdd, function(split, part) {
     covar.in <- value(covar)
+    colidxs <- list()
 
-    lapply(part, function(a.lambda) {
+    mumap <- lapply(part, function(a.lambda) {
 
-      colindex <- a.lambda[[1]]
+      colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
       column <- rep(0, N)
       lapply(a.lambda[[2]], function(x) {
-
         column[x[[1]]] <<- x[[2]]
       })
-
-      list(colindex, 
-           covar.in %*% vb.variational.reg(Y=column, X = covar.in)
-      )
+      covar.in %*% vb.variational.reg(Y=column, X = covar.in)
     }) 
+    mumap <- do.call(cbind, mumap)
+    index <- 0
+    colidxs <- unlist(colidxs)
+    apply(mumap, MARGIN=1, function(x) {
+      index <<- index + 1
+      list(as.integer(index), # column of mu, equivalent to doc number
+           list(
+             colidxs, # positions within the dn-specific mu vector
+             x
+           )
+           )
+    })
   })
+  combineByKey(mu.rdd, createCombiner = function(v) {
+    C <- rep(0, K-1)
+    C[v[[1]]] <- C[v[[1]]] + v[[2]]
+    C
+  }, mergeValue = function(C, v) {
+    C[v[[1]]] <- v[[2]]
+    C
+  }, mergeCombiners = `+`, 
+  numPartitions = as.integer(settings$spark.partitions))
 }
 
 #
