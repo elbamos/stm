@@ -17,35 +17,21 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   
 #  assert_that(!fixedintercerpt)
   
- # counts <- beta.ss
-  
   covar.broadcast <- settings$covar.broadcast
   m.broadcast <- settings$m.broadcast
   
   mult.nobs <- br #number of multinomial draws in the sample
   offset <- log(mult.nobs)
   offset.broadcast <- broadcast(spark.context, offset)
-  
-  # it is cheaper to re-distribute counts as an RDD each pass through the loop than it would be to 
-  # convert the matrix from rows to columns.  This is something potentially worth revisiting
-  # for very large data sets.
-#   counts <- split(counts, col(counts)) # now a list, indexed by term, of arrays
-#   index <- 0
-#   counts.list <- lapply(counts, function(x) {
-#     index <<- index + 1
-#     list(
-#       t = index, 
-#       c.i = x#, 
-#       #      m.i = ifelse(is.null(m), NULL, m[index])
-#     )
-#   })
-#   bf <- paste0(settings$betafile, round(rnorm(1) * 10000))
-#   saveAsObjectFile(parallelize(spark.context, counts.list, spark.partitions), bf)
-#   counts.rdd <- objectFile(spark.context, bf, spark.partitions)
-#   rm(counts.list)
-  
-  counts.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "betacolumns"), 
-                                   function(x) x[[2]]), as.integer(spark.partitions))
+
+#  counts.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "betacolumns"), 
+#                                   function(x) x[[2]]), as.integer(spark.partitions))
+  counts.rdd <- groupByKey(mapPartitions(counts.rdd, function(part) {
+      x <- Filter(function(f) f[[1]] == "betacolumns", part)
+      out <- list()
+      lapply(x, function(y) out <<- c(out, y[[2]]))
+    }), as.integer(spark.partitions)
+  )
   
   #########
   #Distributed Poissons
@@ -86,17 +72,15 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
       subM(mod$beta,lambda) #return coefficients
     } )
 
-#    coef <- do.call(cbind,map.out)
     coef <- covar.in %*% coef # should have one column for each vocab in input, and rows = nrow(covar.in)
-                              # there should be A*K rows
-    assert_that(nrow(coef) == A*K)
+                              
+    assert_that(nrow(coef) == A*K) # there should be A*K rows
 
-#    coef <- matrix(coef)
     colidxs <- unlist(colidxs)    
     coef <- sweep(coef, 2, 
                   STATS=m[colidxs], FUN="+")
     coef <- exp(coef)
-    # want to split into one matrix per aspect.  First split into list of aspects, one vector each
+    # want to split into one matrix per aspect. 
     coef <- split(coef, rep(1:A, each = K)  )
 
     index <- 0
@@ -140,8 +124,7 @@ subM <- function(x, p) {
 
 
 #
-# This function has not been tested - there's no point until we have a viable theory of how to do 
-# opt sigma in the cluster, which as of now we don't.  
+# Function works with small amounts of data, but for some reason it uses Matrix objects sometimes, and then fails.  
 #
 opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 #   if (mode == "L1") return(stm:::opt.mu(lambda, mode, covar, enet))
@@ -149,17 +132,24 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   N <- settings$dim$N
   K <- settings$dim$K
   # need to turn lambda into columns -- which is interesting since we need lambda to be rows for opt sigma
-  lambda.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "lambdacolumns"), 
-                     function(x) x[[2]]), as.integer(settings$spark.partitions))
-  
+#  lambda.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "lambdacolumns"), 
+#                     function(x) x[[2]]), as.integer(settings$spark.partitions))
   covar <- settings$X.broadcast
   
+  # extract the chunks of lambda columns from the hpb output
+  lambda.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
+      x <- Filter(function(f) f[[1]] == "lambdacolumns", part)
+      out <- list()
+      lapply(x, function(y) out <<- c(out, y[[2]]))
+    }), as.integer(settings$spark.partitions)
+  )
+  # consolidate columns, perform vb.variational.reg on each, multiply by covar to produce some rows of mu, and 
+  # then split them up into chunks of the columns of completed mu
   mu.rdd <- mapPartitionsWithIndex(lambda.rdd, function(split, part) {
     covar.in <- value(covar)
     colidxs <- list()
 
     mumap <- lapply(part, function(a.lambda) {
-
       colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
       column <- rep(0, N)
       lapply(a.lambda[[2]], function(x) {
@@ -167,7 +157,8 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
       })
       covar.in %*% vb.variational.reg(Y=column, X = covar.in)
     }) 
-    mumap <- do.call(cbind, mumap)
+    mumap <- matrix(do.call(cbind, mumap))
+    
     index <- 0
     colidxs <- unlist(colidxs)
     apply(mumap, MARGIN=1, function(x) {
@@ -180,15 +171,17 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
            )
     })
   })
-  combineByKey(mu.rdd, createCombiner = function(v) {
-    C <- rep(0, K-1)
-    C[v[[1]]] <- C[v[[1]]] + v[[2]]
-    C
-  }, mergeValue = function(C, v) {
-    C[v[[1]]] <- v[[2]]
-    C
-  }, mergeCombiners = `+`, 
-  numPartitions = as.integer(settings$spark.partitions))
+  # Reassemble each column chunk into complete columns 
+  mapPartitions(groupByKey(mu.rdd, as.integer(settings$spark.partitions)), function(part) {
+    lapply(part, function(x) {
+      mucolidx <- x[[1]]
+      column <- rep(0, K-1)
+      lapply(x[[2]], function(y) {
+        column[y[[1]]] <<- y[[2]]  
+      })
+      list(mucolidx, column)
+    })
+  })
 }
 
 #
@@ -198,22 +191,14 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 # we could loop it through documents.rdd, or through hpb.rdd (persisting that). 
 # But we need to solve sigma and broadcast it since we need all of sigma in the e-step.  So, to think about. 
 #
-opt.sigma.spark <- function(sigma.ss, lambda, mu, settings) {  
+opt.sigma.spark <- function(sigma.ss, lambda.rdd, mu.rdd, settings) {  
   sigprior <- settings$sigma$prior
-  # Assume that lambda is an rdd, and mu is an rdd unless its only one column
-  onecol <- FALSE # is mu only 1 column?
-  if (onecol) {
-    covariance <- mapValues(lambda, function(x) {
-      # This could easily be converted to run off of either documents.rdd or hpb.rdd.  Probably hpb, since
-      # then we could partition by index
-      x - as.numeric(mu)
-    })
-  } else {
-    covariance.rdd <- join(lambda, mu, spark.partitions = as.integer(settings$spark.partitions))
-    # This has to be run off of documents.rdd, or hpb.rdd has to be split into rows.  Because mu is
-    # separate columns.
-    covariance.rdd <- mapValues(covariance.rdd, function(x) {x[[1]] - x[[2]]})
-  } 
+
+  covariance.rdd <- join(lambda.rdd, mu.rdd, spark.partitions = as.integer(settings$spark.partitions))
+  covariance.rdd <- mapPartitions(covariance.rdd, function(part) {
+    lapply(part, function(x) x[[1]] - x[[2]])
+  })
+   
   covar.cells.rdd <- mapPartitions(covariance.rdd, function(part) {
     startrow <- part[[1]][[1]]
     interim <- lapply(part, function(x) x[[2]])
