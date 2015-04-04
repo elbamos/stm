@@ -24,8 +24,6 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   offset <- log(mult.nobs)
   offset.broadcast <- broadcast(spark.context, offset)
 
-#  counts.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "betacolumns"), 
-#                                   function(x) x[[2]]), as.integer(spark.partitions))
   counts.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
       x <- Filter(function(f) f[[1]] == "b", part)
       x[[1]][[2]]
@@ -96,7 +94,6 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
       aspect <- x[[1]]
       C <- matrix(rep(0, V * K), nrow = K)
       lapply(x[[2]], function(v) {
-#        y <- matrix(v[[2]], nrow = K)
         C[,v[[1]] ] <<- v[[2]]
       })
       list(aspect, C/rowSums(C))
@@ -131,16 +128,16 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 #   if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
   N <- settings$dim$N
   K <- settings$dim$K
-  # need to turn lambda into columns -- which is interesting since we need lambda to be rows for opt sigma
-#  lambda.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "lambdacolumns"), 
-#                     function(x) x[[2]]), as.integer(settings$spark.partitions))
+
   covar <- settings$X.broadcast
+
+  mu.partitions <-as.integer(round(min(settings$spark.partitions, sqrt(K))))
   
   # extract the chunks of lambda columns from the hpb output
   lambda.rdd <- groupByKey(mapPartitionsWithIndex(hpb.rdd, function(split, part) {
     x <- Filter(function(f) f[[1]] == "l", part)
     x[[1]][[2]]
-    }), as.integer(settings$spark.partitions)
+    }), mu.partitions
   )
   # consolidate columns, perform vb.variational.reg on each, multiply by covar to produce some rows of mu, and 
   # then split them up into chunks of the columns of completed mu
@@ -151,7 +148,6 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
       column <- rep(0, N)
       lapply(a.lambda[[2]], function(x) {
         column[x[[1]]] <<- x[[2]]
- #       column[x[[1]]:(x[[1]] + length(x[[2]]) - 1)] <<- x[[2]]
       })
       column
     })
@@ -168,9 +164,11 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
     })
     mumap2 <- do.call(cbind, mumap2)
 
+    # now have a row-wise slice of mu
+
     index <- 0
     colidxs <- unlist(colidxs)
-    apply(mumap, MARGIN=1, function(x) {
+    apply(mumap2, MARGIN=1, function(x) {
       index <<- index + 1
       list(as.integer(index), # column of mu, equivalent to doc number
            list(
@@ -207,16 +205,12 @@ opt.sigma.spark <- function(nu, lambda.rdd, mu.rdd, settings) {
     })
   })
   covariance <- collectAsMap(covariance.rdd)
-  unpersist(old)
-  unpersist(mu.rdd)
- # N <- length(covariance)
   covariance <- do.call(rbind,covariance[order(names(covariance))]) 
   covariance <- crossprod(covariance)
-  # now need to take the crossproduct of covariance.rdd
-  # then figure out how to do the below...
-  # print(str(covariance))
+  unpersist(old)
+  unpersist(mu.rdd)
+
   sigma <- (covariance + nu)/settings$dim$N #add to estimation variance
-  # print(str(sigma))
   sigma <- diag(diag(sigma),nrow=nrow(nu))*sigprior + (1-sigprior)*sigma #weight by the prior
   list(sigma, documents.rdd)
 }
