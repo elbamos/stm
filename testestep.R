@@ -120,7 +120,7 @@ bigtest <- function() {
   bigtest <- stm(documents = out2$documents,
                  vocab = out2$vocab,
                  data = out2$meta, 
-                 max.em.its = 3, 
+                 max.em.its = 10, 
                  content = ~tag,
                  prevalence = ~screenName,
                  #                  control = list(cpp = TRUE), 
@@ -136,9 +136,9 @@ bigtest <- function() {
 #local()
 cluster()
 
-smalltest()
+#smalltest()
 ## mediumtest()
-#bigtest()
+bigtest()
 
 # using 19 m1.large instances
 # on one t2 instance        e-step 1200-1700        m-step 70
@@ -165,6 +165,6 @@ smalltest()
 # 2-stage distM   38cpu     e-step  165             m-step  51
 # 2-stage distBM  38cpu     e-step  200             m-step  66 -- Note, this converged, which means something isn't
 #                                                                 calculating right
-# fully distributed m-step, minimal optimization of that.  commit 0x904f3666
-# uses a 2-stage m-step, distributed mu and beta.  No distributed sigma.
-# 38 cpus                   e-step  
+# fully distributed m-step, minimal optimization of that.  commit 0x378e67cc
+# uses a 2-stage m-step, distributed mu, beta and sigma.  
+# 38 cpus                   e-step  140             m-step  160
