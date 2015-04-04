@@ -145,7 +145,7 @@ bigtest <- function() {
 cluster()
 
 #smalltest()
-# mediumtest()
+## mediumtest()
 bigtest()
 
 # using 19 m1.large instances

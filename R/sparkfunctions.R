@@ -103,3 +103,8 @@ hpb <- function(eta, doc.ct, mu, siginv, beta, Ndoc=sum(doc.ct), sigmaentropy) {
   #bundle everything up.
   return(list(phis=phi, eta=list(lambda=eta, nu=nu), bound=bound))
 }
+
+vectorcombiner <- function(x) {
+  x <- Reduce(x = x, f = function(x, y) list(c(x[[1]], y[[1]]), c(x[[2]], y[[2]])))
+  x[[2]][order(x[[1]])]
+}

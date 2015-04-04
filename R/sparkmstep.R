@@ -26,10 +26,9 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
 
 #  counts.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "betacolumns"), 
 #                                   function(x) x[[2]]), as.integer(spark.partitions))
-  counts.rdd <- groupByKey(mapPartitions(counts.rdd, function(part) {
+  counts.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
       x <- Filter(function(f) f[[1]] == "betacolumns", part)
-      out <- list()
-      lapply(x, function(y) out <<- c(out, y[[2]]))
+      x[[1]][[2]]
     }), as.integer(spark.partitions)
   )
   
@@ -137,10 +136,9 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   covar <- settings$X.broadcast
   
   # extract the chunks of lambda columns from the hpb output
-  lambda.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
-      x <- Filter(function(f) f[[1]] == "lambdacolumns", part)
-      out <- list()
-      lapply(x, function(y) out <<- c(out, y[[2]]))
+  lambda.rdd <- groupByKey(mapPartitionsWithIndex(hpb.rdd, function(split, part) {
+    x <- Filter(function(f) f[[1]] == "lambdacolumns", part)
+    x[[1]][[2]]
     }), as.integer(settings$spark.partitions)
   )
   # consolidate columns, perform vb.variational.reg on each, multiply by covar to produce some rows of mu, and 
@@ -148,7 +146,6 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   mu.rdd <- mapPartitionsWithIndex(lambda.rdd, function(split, part) {
     covar.in <- value(covar)
     colidxs <- list()
-
     mumap <- lapply(part, function(a.lambda) {
       colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
       column <- rep(0, N)
@@ -156,8 +153,9 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
         column[x[[1]]] <<- x[[2]]
       })
       covar.in %*% vb.variational.reg(Y=column, X = covar.in)
-    }) 
-    mumap <- matrix(do.call(cbind, mumap))
+    })
+    mumap <- do.call(cbind, mumap)
+    mumap <- as.matrix(mumap)
     
     index <- 0
     colidxs <- unlist(colidxs)
@@ -175,10 +173,11 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   mapPartitions(groupByKey(mu.rdd, as.integer(settings$spark.partitions)), function(part) {
     lapply(part, function(x) {
       mucolidx <- x[[1]]
-      column <- rep(0, K-1)
-      lapply(x[[2]], function(y) {
-        column[y[[1]]] <<- y[[2]]  
-      })
+#       column <- rep(0, K-1)
+#       lapply(x[[2]], function(y) {
+#         column[y[[1]]] <<- y[[2]]  
+#       })
+      column <- vectorcombiner(x[[2]])
       list(mucolidx, column)
     })
   })
