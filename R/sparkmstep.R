@@ -170,7 +170,7 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 
     index <- 0
     colidxs <- unlist(colidxs)
-    apply(mumap, MARGIN=1, function(x) {
+    apply(mumap2, MARGIN=1, function(x) {
       index <<- index + 1
       list(as.integer(index), # column of mu, equivalent to doc number
            list(
