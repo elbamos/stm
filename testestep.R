@@ -168,3 +168,5 @@ bigtest()
 # fully distributed m-step, minimal optimization of that.  commit 0x378e67cc
 # uses a 2-stage m-step, distributed mu, beta and sigma.  
 # 38 cpus                   e-step  140             m-step  160
+# some optimization of the opt-mu, and fixing the format of the output 0x19251b5e 
+# 38 cpus                   e-step  120             m-step  230  --- SOMETHING MAY BE OFF IN CALCULATION, PROBABLY OF MU

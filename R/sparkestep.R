@@ -14,42 +14,27 @@ estep.lambda <- function(
   # If mu is not being turned into an rdd, use 0.  If mu is being turned into an rdd,
   # it will still be broadcast on the first iteration so use 1.  If its already an rdd, use 2. 
   #
-
-    if ("Broadcast" %in% class(mu.distributed)) {
-      mstage <- 1
-    } else {
-      mstage <- 2
-    }
-  iteration <- settings$iteration
-  K <- settings$dim$K
   
   mapPartitionsWithIndex(documents.rdd, function(split, part) {
-    if (mstage < 2) mu.in <- value(mu.distributed)
+    if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
     assert_that(length(part) > 0)
     lapply(part, function(document) {
-      if (mstage > 0) {
-        document <- document[[2]]
-        if (length(document) == 2) {
-          mu.i <- document[[2]]
-          document <- document[[1]]
-          document$mu.i <- mu.i
-        }
+      document <- document[[2]]
+      if (length(document) == 2) {
+        mu.i <- document[[2]]
+        document <- document[[1]]
+        document$mu.i <- mu.i
       }
-      if (mstage < 2) {
+      
+      if ("Broadcast" %in% class(mu.distributed)) {
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
         } else {
           mu.i <- as.numeric(mu.in)
         }        
       }
-      if (length(mu.i) != K-1) {
-        print(str(part))
-        stop()
-      }
-#      assert_that(length(mu.i) == K - 1)
-#      if (value(iteration) == 1) stop(mu.i)
       
       beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
 
@@ -57,11 +42,7 @@ estep.lambda <- function(
                           method="BFGS", control=list(maxit=500),
                           doc.ct=document$d[2,], mu=mu.i,
                           siginv=siginv.in, beta=beta.i.lambda, Ndoc = document$nd)$par
-      if (mstage > 0) {
-        list(document$dn, document)
-      } else {
-        document
-      }
+      list(document$dn, document)
     })
   })
 }
@@ -80,15 +61,6 @@ estep.hpb <- function(
   spark.partitions,
   verbose) {
   
-  mstage <- 0
-
-    if ("Broadcast" %in% class(mu.distributed)) {
-      mstage <- 1
-    } else {
-      mstage <- 2
-    }
-
-  
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
   hpb.rdd <- mapPartitionsWithIndex(documents.rdd, function(split,part) {
@@ -99,18 +71,16 @@ estep.hpb <- function(
     sigma.ss <- diag(0, nrow=(K-1))
     lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
     
-    if (mstage < 2) mu.in <- value(mu.distributed)
+    if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
     sigmaentropy.in <- value(sigmaentropy.broadcast)
     assert_that(length(part) > 0)
     bound <- 0
     lapply(part, function(document) {
-      if (mstage > 0) {
-        document <- document[[2]]
-        mu.i <- document$mu.i
-      } 
-      if (mstage < 2) {
+      document <- document[[2]]
+      mu.i <- document$mu.i
+      if ("Broadcast" %in% class(mu.distributed)){
         if (ncol(mu.in) > 1) {
           mu.i <- mu.in[,document$dn]
         } else {
@@ -131,38 +101,35 @@ estep.hpb <- function(
     })
     beta.ss <- do.call(rbind, beta.ss)
     br <- rowSums(beta.ss)
+    
     index <- 0
-#    startrow <- as.integer(lambda[1,1])
     betaout <- apply(beta.ss, MARGIN=2, FUN= function(x) {
       index <<- index + 1
       if (sum(x) == 0) {NULL} 
       else {list(as.integer(index), x)}
     })
     betaout <- Filter(Negate(is.null), betaout)
+    
     index <- 0
     lr <- lambda[,1]
-#    if(sum(lr) != sum(lr[1]:(lr[1] + length(lr) - 1))) print(lr)
- #   lr <- lr[1]
     lambda <- lambda[,2:ncol(lambda)]
     lambdaout <- apply(lambda, MARGIN=2, FUN=function(x) {
       index <<- index + 1
       list(as.integer(index), list(lr, x))
     })
 
-#    index <- as.integer(split/sqrt(spark.partitions))
-    list(list(key = "output", list(
+    list(list("o", list(
       s = sigma.ss, 
       bd = sum(bound),
-      br = br#,
-#      l = lambda
+      br = br
     )), 
-    list(key = "betacolumns", betaout), 
-    list(key = "lambdacolumns", lambdaout))
+    list( "b", betaout), 
+    list("l", lambdaout))
   })
 
   # merge the sufficient stats generated for each partition
   cache(hpb.rdd)
-  output.rdd <- filterRDD(hpb.rdd, function(x) x[[1]] == "output")
+  output.rdd <- filterRDD(hpb.rdd, function(x) x[[1]] == "o")
   out <- reduce(output.rdd, function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
@@ -171,13 +138,10 @@ estep.hpb <- function(
     assert_that(length(x) == 3, length(x) == length(y))
       list(bd = x$bd + y$bd, 
            s = x$s + y$s, 
-#           l = rbind(x$l, y$l), 
            br = x$br + y$br
       )
   })
 
-#  lambda <- out$l[order(out$l[,1]),]
-#  out$l <- lambda[,-1]
   out$hpb.rdd <- hpb.rdd
   out
 }

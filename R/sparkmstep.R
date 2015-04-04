@@ -27,7 +27,7 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
 #  counts.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "betacolumns"), 
 #                                   function(x) x[[2]]), as.integer(spark.partitions))
   counts.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
-      x <- Filter(function(f) f[[1]] == "betacolumns", part)
+      x <- Filter(function(f) f[[1]] == "b", part)
       x[[1]][[2]]
     }), as.integer(spark.partitions)
   )
@@ -138,7 +138,7 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   
   # extract the chunks of lambda columns from the hpb output
   lambda.rdd <- groupByKey(mapPartitionsWithIndex(hpb.rdd, function(split, part) {
-    x <- Filter(function(f) f[[1]] == "lambdacolumns", part)
+    x <- Filter(function(f) f[[1]] == "l", part)
     x[[1]][[2]]
     }), as.integer(settings$spark.partitions)
   )
@@ -163,13 +163,10 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
     xycorr <- crossprod(covar.in, mumap)    
     
     index <- 1:ncol(xycorr)
-    mumap2 <- apply(index, FUN=function(i) {
+    mumap2 <- lapply(index, FUN=function(i) {
       covar.in %*% vb.variational.reg(Y=mumap[,i], X = covar.in, Xcorr = xcorr, XYcorr = xycorr[,i])
     })
-        
-#      covar.in %*% vb.variational.reg(Y=column, X = covar.in, Xcorr = xcorr)
-#    })
-    mumap2 <- t(mumap2)
+    mumap2 <- do.call(cbind, mumap2)
 
     index <- 0
     colidxs <- unlist(colidxs)

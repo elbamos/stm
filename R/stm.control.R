@@ -134,10 +134,10 @@ stm.control.spark <- function(documents, vocab, settings, model,
   #Step 2: Run EM
   ############
   hpb.rdd <- NULL
-  iteration <- 0
+#  iteration <- 0
   while(!stopits) {
-    iteration <<- iteration + 1
-    settings$iteration <- broadcast(spark.context, iteration)
+#    iteration <<- iteration + 1
+#   settings$iteration <- broadcast(spark.context, iteration)
     t1 <- proc.time()
     cat("Beginning E-Step\t")
     
@@ -233,8 +233,16 @@ stm.control.spark <- function(documents, vocab, settings, model,
   }
   beta$beta <- NULL
   beta$beta.distributed <- NULL
+  lambda.rdd <- mapValues(documents.rdd, function(x) x[[1]]$l)
+  mu.rdd <- mapValues(documents.rdd, function(x) x[[2]])
+  lambda <- collectAsMap(lambda.rdd)
+  lambda <- lambda[order(names(lambda))]
+  lambda <- do.call(rbind, lambda)
+  mu <- collectAsMap(mu.rdd)
+  mu <- mu[order(names(mu))]
+  mu <- do.call(cbind, mu)
   lambda <- cbind(lambda,0)
-  model <- list(mu=mu.local, sigma=sigma, beta=beta, settings=settings,
+  model <- list(mu=mu, sigma=sigma, beta=beta, settings=settings,
                 vocab=vocab, convergence=convergence, 
                 theta=exp(lambda - stm:::row.lse(lambda)), 
                 eta=lambda[,-ncol(lambda), drop=FALSE],
