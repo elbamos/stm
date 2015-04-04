@@ -194,9 +194,18 @@ opt.sigma.spark <- function(nu, lambda.rdd, mu.rdd, settings) {
   documents.rdd <- join(lambda.rdd, mu.rdd, as.integer(settings$spark.partitions))
   persist(documents.rdd, settings$spark.persistence)
   covariance.rdd <- mapPartitions(documents.rdd, function(part) {
-    lapply(part, function(x) list(x[[1]],
-      x[[2]][[1]]$l - x[[2]][[2]]
-    ))
+    lapply(part, function(x) {
+      assert_that(length(x) == 2, 
+                  length(x[[2]]) == 2, 
+                  !is.null(x[[2]][[1]]$l), 
+                  !is.null(x[[2]][[2]]),
+                  is.numeric(x[[2]][[1]]$l),
+                  is.numeric(x[[2]][[2]])
+                  )
+      list(x[[1]],
+        x[[2]][[1]]$l - x[[2]][[2]]
+      )
+    })
   })
   covariance <- collectAsMap(covariance.rdd)
   unpersist(old)

@@ -136,9 +136,9 @@ bigtest <- function() {
 #local()
 cluster()
 
-#smalltest()
+smalltest()
 ## mediumtest()
-bigtest()
+#bigtest()
 
 # using 19 m1.large instances
 # on one t2 instance        e-step 1200-1700        m-step 70

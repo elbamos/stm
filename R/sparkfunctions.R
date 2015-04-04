@@ -40,7 +40,7 @@ distribute.lambda <- function(lambda, spark.context, spark.partitions) {
 }
 
 distribute.mu <- function(mu, spark.context, spark.partitions, settings) {
-  if ("DIST_M" %in% mstep && ncol(mu$mu) > 1) {
+  if (ncol(mu$mu) > 1) {
     mf <- paste0(settings$mufile, round(rnorm(1) * 10000))
     index <- 0
     mu <- apply(mu$mu, MARGIN=2, function(x) {
