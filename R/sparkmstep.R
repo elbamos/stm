@@ -146,6 +146,8 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   # then split them up into chunks of the columns of completed mu
   mu.rdd <- mapPartitionsWithIndex(lambda.rdd, function(split, part) {
     covar.in <- value(covar)
+    covar.in <- Matrix::as.matrix(covar.in)
+    xcorr <- crossprod(covar.in)
     colidxs <- list() #Reduce(x = part, function(x, y) c(x[[1]], y[[1]]))
     mumap <- lapply(part, function(a.lambda) {
       colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
@@ -155,7 +157,7 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
  #       column[x[[1]]:(x[[1]] + length(x[[2]]) - 1)] <<- x[[2]]
       })
 
-      covar.in %*% vb.variational.reg(Y=column, X = covar.in)
+      covar.in %*% vb.variational.reg(Y=column, X = covar.in, Xcorr = xcorr)
     })
     mumap <- do.call(cbind, mumap)
     mumap <- as.matrix(mumap)
@@ -199,9 +201,14 @@ opt.sigma.spark <- function(nu, lambda.rdd, mu.rdd, settings) {
                   length(x[[2]]) == 2, 
                   !is.null(x[[2]][[1]]$l), 
                   !is.null(x[[2]][[2]]),
-                  is.numeric(x[[2]][[1]]$l),
-                  is.numeric(x[[2]][[2]])
+                  is.numeric(x[[2]][[1]]$l)
                   )
+      testop <- x[[2]][[2]]
+      print(class(testop))
+      print(class(as.matrix(testop)))
+      print(class(as.vector(testop)))
+      print(class(matrix(testop)))
+      print(class(testop@x))
       list(x[[1]],
         x[[2]][[1]]$l - x[[2]][[2]]
       )
@@ -224,10 +231,10 @@ opt.sigma.spark <- function(nu, lambda.rdd, mu.rdd, settings) {
 
 
 #Variational Linear Regression with a Half-Cauchy hyperprior 
-# (Implementation based off the various LMM examples from Matt Wand)
-# This code is intended to be passed a Matrix object
-vb.variational.reg <- function(Y,X, b0=1, d0=1) {
-  Xcorr <- crossprod(X)
+# This code can be drastically speeded up because it reuses the same results repeatedly.  The XYCorr calculation 
+# can also be done in bulk, and then split up into columns for the rest of the calculation
+vb.variational.reg <- function(Y,X,Xcorr, b0=1, d0=1) {
+#  Xcorr <- crossprod(X)
   XYcorr <- crossprod(X,Y) 
   
   an <- (1 + nrow(X))/2
