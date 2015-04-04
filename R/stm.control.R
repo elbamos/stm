@@ -122,6 +122,12 @@ stm.control.spark <- function(documents, vocab, settings, model,
   X <-  settings$covariates$X
   settings$X.broadcast <- broadcast(spark.context, X)
   settings$spark.partitions <- spark.partitions
+  settings$spark.persistence <- spark.persistence
+  
+  sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
+  siginv <- solve(sigma)
+  siginv.broadcast <- broadcast(spark.context, siginv)
+  sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
   
   if (doDebug) print("Distributed initial rdd's")
   ############
@@ -136,14 +142,6 @@ stm.control.spark <- function(documents, vocab, settings, model,
     cat("Beginning E-Step\t")
     
     # siginv and sigmaentropy have to be broadcast each pass through the loop
-    sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
-    siginv <- solve(sigma)
-    siginv.broadcast <- broadcast(spark.context, siginv)
-    sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
-    old <- documents.rdd
-    if (! "Broadcast" %in% class(mu.distributed)) {
-      documents.rdd <- join(documents.rdd, mu.distributed, as.integer(spark.partitions))
-    }
 
       documents.rdd <- estep.lambda( 
         documents.rdd,
@@ -177,27 +175,19 @@ stm.control.spark <- function(documents, vocab, settings, model,
       t1 <- proc.time()
     }
 
-    lambda <- estep.output$l
-
       if ("RDD" %in% class(mu.distributed)) unpersist(mu.distributed)
       mu.distributed <- opt.mu.spark(hpb.rdd, mode = settings$gamma$mode, settings)
-      persist(mu.distributed, spark.persistence)
-#      mu.local <- getmu(mu.distributed, settings$dim$N)
-      mu.local <- collectAsMap(mu.distributed)
-      mu.local <- do.call(rbind, mu.local) # note - only for testing; produces wrong answer because rows out of order
-      mu.local <- t(mu.local)
-
-      mu.local <- list(mu = mu.local)
-
-
-#         mu.local <- stm:::opt.mu(lambda=lambda, mode=settings$gamma$mode, 
-#                            covar=settings$covariates$X, settings$gamma$enet)
-#         mu.distributed <- distribute.mu(mu.local, spark.context, spark.partitions, settings)
 
     sigma.ss <- estep.output$s
-    sigma <- stm:::opt.sigma(nu=sigma.ss, lambda=lambda, 
-                             mu=mu.local$mu, sigprior=settings$sigma$prior)
-    # Do i need to update sigma$prior?
+    sig.list <- opt.sigma.spark(nu=sigma.ss, documents.rdd, 
+                             mu.distributed, settings)
+    sigma <- sig.list[[1]]
+    documents.rdd <- sig.list[[2]]
+    
+    sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
+    siginv <- solve(sigma)
+    siginv.broadcast <- broadcast(spark.context, siginv)
+    sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
   
     if (is.null(settings$bkappa)) {
       beta.ss <- rbind(estep.output$b)[[1]]

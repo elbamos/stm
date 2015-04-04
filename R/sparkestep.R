@@ -44,7 +44,11 @@ estep.lambda <- function(
           mu.i <- as.numeric(mu.in)
         }        
       }
-      assert_that(length(mu.i) == K - 1)
+      if (length(mu.i) != K-1) {
+        print(str(part))
+        stop()
+      }
+#      assert_that(length(mu.i) == K - 1)
 #      if (value(iteration) == 1) stop(mu.i)
       
       beta.i.lambda <- beta.in[[document$a]][,document$d[1,],drop=FALSE]
@@ -136,17 +140,21 @@ estep.hpb <- function(
     })
     betaout <- Filter(Negate(is.null), betaout)
     index <- 0
-    ll <- lambda[,2:ncol(lambda)]
-    lambdaout <- apply(ll, MARGIN=2, FUN=function(x) {
+    lr <- lambda[,1]
+#    if(sum(lr) != sum(lr[1]:(lr[1] + length(lr) - 1))) print(lr)
+ #   lr <- lr[1]
+    lambda <- lambda[,2:ncol(lambda)]
+    lambdaout <- apply(lambda, MARGIN=2, FUN=function(x) {
       index <<- index + 1
-      list(as.integer(index), list(lambda[,1], x))
+      list(as.integer(index), list(lr, x))
     })
+
 #    index <- as.integer(split/sqrt(spark.partitions))
     list(list(key = "output", list(
       s = sigma.ss, 
       bd = sum(bound),
-      br = br,
-      l = lambda
+      br = br#,
+#      l = lambda
     )), 
     list(key = "betacolumns", betaout), 
     list(key = "lambdacolumns", lambdaout))
@@ -160,16 +168,16 @@ estep.hpb <- function(
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 2) x <- x[[2]]
     if (length(y) == 2) y <- y[[2]]
-    assert_that(length(x) == 4, length(x) == length(y))
+    assert_that(length(x) == 3, length(x) == length(y))
       list(bd = x$bd + y$bd, 
            s = x$s + y$s, 
-           l = rbind(x$l, y$l), 
+#           l = rbind(x$l, y$l), 
            br = x$br + y$br
       )
   })
 
-  lambda <- out$l[order(out$l[,1]),]
-  out$l <- lambda[,-1]
+#  lambda <- out$l[order(out$l[,1]),]
+#  out$l <- lambda[,-1]
   out$hpb.rdd <- hpb.rdd
   out
 }

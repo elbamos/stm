@@ -106,6 +106,7 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   # We're collecting this only so we can broadcast it again because we haven't figured out a memory-efficient
   # way to join beta.rdd and documents.rdd.  
   beta <- collectAsMap(mnreg.rdd)
+  beta <- beta[order(names(beta))]
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
   list(beta = beta, nlambda=nlambda, beta.distributed = beta.distributed)
 }
@@ -145,18 +146,20 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   # then split them up into chunks of the columns of completed mu
   mu.rdd <- mapPartitionsWithIndex(lambda.rdd, function(split, part) {
     covar.in <- value(covar)
-    colidxs <- list()
+    colidxs <- list() #Reduce(x = part, function(x, y) c(x[[1]], y[[1]]))
     mumap <- lapply(part, function(a.lambda) {
       colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
       column <- rep(0, N)
       lapply(a.lambda[[2]], function(x) {
         column[x[[1]]] <<- x[[2]]
+ #       column[x[[1]]:(x[[1]] + length(x[[2]]) - 1)] <<- x[[2]]
       })
+
       covar.in %*% vb.variational.reg(Y=column, X = covar.in)
     })
     mumap <- do.call(cbind, mumap)
     mumap <- as.matrix(mumap)
-    
+
     index <- 0
     colidxs <- unlist(colidxs)
     apply(mumap, MARGIN=1, function(x) {
@@ -168,18 +171,12 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
            )
            )
     })
+#     print("mu out")
+#     print(str(out))
   })
   # Reassemble each column chunk into complete columns 
   mapPartitions(groupByKey(mu.rdd, as.integer(settings$spark.partitions)), function(part) {
-    lapply(part, function(x) {
-      mucolidx <- x[[1]]
-#       column <- rep(0, K-1)
-#       lapply(x[[2]], function(y) {
-#         column[y[[1]]] <<- y[[2]]  
-#       })
-      column <- vectorcombiner(x[[2]])
-      list(mucolidx, column)
-    })
+    lapply(part, function(x) list(x[[1]], vectorcombiner(x[[2]])))
   })
 }
 
@@ -190,63 +187,30 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 # we could loop it through documents.rdd, or through hpb.rdd (persisting that). 
 # But we need to solve sigma and broadcast it since we need all of sigma in the e-step.  So, to think about. 
 #
-opt.sigma.spark <- function(sigma.ss, lambda.rdd, mu.rdd, settings) {  
+opt.sigma.spark <- function(nu, lambda.rdd, mu.rdd, settings) {  
   sigprior <- settings$sigma$prior
-
-  covariance.rdd <- join(lambda.rdd, mu.rdd, spark.partitions = as.integer(settings$spark.partitions))
-  covariance.rdd <- mapPartitions(covariance.rdd, function(part) {
-    lapply(part, function(x) x[[1]] - x[[2]])
+  # is this collecting them in order?
+  old <- lambda.rdd
+  documents.rdd <- join(lambda.rdd, mu.rdd, as.integer(settings$spark.partitions))
+  persist(documents.rdd, settings$spark.persistence)
+  covariance.rdd <- mapPartitions(documents.rdd, function(part) {
+    lapply(part, function(x) list(x[[1]],
+      x[[2]][[1]]$l - x[[2]][[2]]
+    ))
   })
-   
-  covar.cells.rdd <- mapPartitions(covariance.rdd, function(part) {
-    startrow <- part[[1]][[1]]
-    interim <- lapply(part, function(x) x[[2]])
-    interim <- do.call(cbind, interim)
-    index <- 0
-    apply(interim, MARGIN=1, function(x) {
-      index <<- index + 1
-      list(index, 
-           list(colstart = startrow,
-                x
-                ))
-    })
-  })
-  covar.rows.rdd <- combineByKey(covar.cells.rdd, function(v) {
-    C <- rep(0, K - 1)
-    C[v[[1]]:(v[[1]] + length(v[[2]]) - 1)] <- v[[2]]
-    C
-  }, function(C, v) {
-    C[v[[1]]:(v[[1]] + length(v[[2]]) - 1)] <- v[[2]]
-    C
-  }, 
-  "+", 
-  as.integer(spark.partitions)
-  )
-  covar.rows.rdd <- flatMap(covar.rows.rdd, function(x) {
-    out <- list()
-    for (i in 1:(K-1)) {
-      out[[i]] <- list(coltomatch = i, 
-           list(row = x[[1]], 
-                x[[2]]))
-    }
-  })
-  crossprod.rdd <- rightOuterJoin(covar.rows.rdd, covariance.rdd, as.integer(spark.partitions))
-  crossprod.rdd <- mapPartitions(crossprod.rdd, function(part) {
-    out <- matrix(rep(0, (K-1)^2), nrow = K - 1)
-    lapply(part, function(x) {
-      out.column <- x[[1]]
-      in.column <- x[[2]][[2]]
-      out.row <- x[[2]][[1]]$row
-      in.row <- x[[2]][[1]]$x
-      out[out.row, in.row] <<- sum(in.column * in.row)
-    })
-  })
-  
+  covariance <- collectAsMap(covariance.rdd)
+  unpersist(old)
+  unpersist(mu.rdd)
+ # N <- length(covariance)
+  covariance <- do.call(rbind,covariance[order(names(covariance))]) 
+  covariance <- crossprod(covariance)
   # now need to take the crossproduct of covariance.rdd
   # then figure out how to do the below...
-  sigma <- (covariance + nu)/nrow(lambda) #add to estimation variance
+  # print(str(covariance))
+  sigma <- (covariance + nu)/settings$dim$N #add to estimation variance
+  # print(str(sigma))
   sigma <- diag(diag(sigma),nrow=nrow(nu))*sigprior + (1-sigprior)*sigma #weight by the prior
-  return(sigma)
+  list(sigma, documents.rdd)
 }
 
 

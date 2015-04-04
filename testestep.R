@@ -29,15 +29,6 @@ library(SparkR)
 #
 
 doDebug <- FALSE
-mstep <- "DIST_B"# c("DIST_M")#, "DIST_M") # "DIST_M"
-estages <- 2
-reduction <-NULL #"COUNT"# c("COUNT") #"COMBINE" "KEY", "COLLECT", "COLLECTPARTITION", "COUNT", "REPARTITION"
-
-# COUNT and COLLECT -- 
-# COLLECT ALONE -- 
-# REPARTITION -- 
-# COMBINE -- 
-# KEY -- 
 
 ram <- "6g"
 Sys.setenv(SPARK_MEM=ram)
@@ -48,6 +39,7 @@ cluster <- function() {
                     spark.storage.memoryFraction = "0.1",
                     spark.serializer="org.apache.spark.serializer.KryoSerializer",
                     spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
+                    spark.kryoserializer.buffer.mb = "512",
   driver.memory="28g",
   driver.maxResultSize='28g',
                     spark.driver.memory=ram, 
@@ -173,3 +165,6 @@ bigtest()
 # 2-stage distM   38cpu     e-step  165             m-step  51
 # 2-stage distBM  38cpu     e-step  200             m-step  66 -- Note, this converged, which means something isn't
 #                                                                 calculating right
+# fully distributed m-step, minimal optimization of that.  commit 0x904f3666
+# uses a 2-stage m-step, distributed mu and beta.  No distributed sigma.
+# 38 cpus                   e-step  
