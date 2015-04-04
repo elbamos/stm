@@ -197,18 +197,6 @@ opt.sigma.spark <- function(nu, lambda.rdd, mu.rdd, settings) {
   persist(documents.rdd, settings$spark.persistence)
   covariance.rdd <- mapPartitions(documents.rdd, function(part) {
     lapply(part, function(x) {
-      assert_that(length(x) == 2, 
-                  length(x[[2]]) == 2, 
-                  !is.null(x[[2]][[1]]$l), 
-                  !is.null(x[[2]][[2]]),
-                  is.numeric(x[[2]][[1]]$l)
-                  )
-      testop <- x[[2]][[2]]
-      print(class(testop))
-      print(class(as.matrix(testop)))
-      print(class(as.vector(testop)))
-      print(class(matrix(testop)))
-      print(class(testop@x))
       list(x[[1]],
         x[[2]][[1]]$l - x[[2]][[2]]
       )
