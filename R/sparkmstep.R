@@ -131,13 +131,12 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 
   covar <- settings$X.broadcast
 
-  mu.partitions <-as.integer(round(min(settings$spark.partitions, sqrt(K))))
   
   # extract the chunks of lambda columns from the hpb output
   lambda.rdd <- groupByKey(mapPartitionsWithIndex(hpb.rdd, function(split, part) {
     x <- Filter(function(f) f[[1]] == "l", part)
     x[[1]][[2]]
-    }), mu.partitions
+    }), as.integer(settings$spark.partitions)
   )
   # consolidate columns, perform vb.variational.reg on each, multiply by covar to produce some rows of mu, and 
   # then split them up into chunks of the columns of completed mu
