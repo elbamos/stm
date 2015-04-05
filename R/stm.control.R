@@ -59,12 +59,13 @@ stm.control.spark <- function(documents, vocab, settings, model,
   doclist <- lapply(documents, FUN = function(x) {
     index <<- index + 1
     list(as.integer(index), list( 
-      dn = as.integer(index),
-      d = x,
-      a = as.integer(betaindex[index]),
-      nd = sum(x[2,]),
-      l = lambda[index,]
-  ))
+         dn = as.integer(index),
+         d = x,
+         a = as.integer(betaindex[index]),
+         nd = sum(x[2,]),
+         l = lambda[index,]
+       )
+    )
   })
 
   # documents.rdd is a pair list.  Each iteration, 
@@ -149,10 +150,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
         beta.distributed,
         mu.distributed, 
         siginv.broadcast,
-        spark.context,
-        spark.partitions,
-        settings,
-        verbose)
+        settings)
       persist(documents.rdd, spark.persistence)
 
       estep.output <- estep.hpb( 
@@ -161,12 +159,8 @@ stm.control.spark <- function(documents, vocab, settings, model,
         settings$dim$A,
         documents.rdd,
         beta.distributed,
-        mu.distributed, 
         siginv.broadcast,
-        sigmaentropy.broadcast,
-        spark.context,
-        spark.partitions,
-        verbose)
+        sigmaentropy.broadcast)
       if (! is.null(hpb.rdd)) unpersist(hpb.rdd)
       hpb.rdd <- estep.output$hpb.rdd
     
@@ -175,9 +169,10 @@ stm.control.spark <- function(documents, vocab, settings, model,
       cat(sprintf("E-Step Completed Within (%d seconds).\n", floor((proc.time()-t1)[3])))
       t1 <- proc.time()
     }
-
+    # Opt mu -- mode must be "Pooled"
     mu.distributed <- opt.mu.spark(hpb.rdd, mode = settings$gamma$mode, settings)
 
+    # Opt sigma
     sigma.ss <- estep.output$s
     sig.list <- opt.sigma.spark(nu=sigma.ss, documents.rdd, 
                              mu.distributed, settings)
@@ -189,13 +184,14 @@ stm.control.spark <- function(documents, vocab, settings, model,
     siginv.broadcast <- broadcast(spark.context, siginv)
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
   
+    # Opt beta
     if (is.null(settings$bkappa)) {
       beta.ss <- reduceByKey(hpb.rdd, function(x) {
            vectorcombiner(x)
       })
       beta.ss <- do.call(rbind, beta.ss)
       beta.ss <- beta.ss / rowSums(beta.ss)
-      beta.distributed <- distribute.beta(beta = list(beta.ss), spark.context = spark.context, spark.partitions = spark.partitions)
+      beta.distributed <- distribute.beta(beta = list(beta.ss), spark.context = spark.context, spark.partitions = spark.partitions) 
       beta$beta <- beta.ss
       beta$beta.distributed <- beta.distributed
     }  else {
@@ -203,18 +199,17 @@ stm.control.spark <- function(documents, vocab, settings, model,
       beta <- mnreg.spark.distributedbeta(hpb.rdd, estep.output$br, settings, spark.context, spark.partitions)
       beta.distributed <- beta$beta.distributed
     }
+    
+    # The bound
     bound.ss <- estep.output$bd  
-
+    
     if (verbose) cat(sprintf("Completed M-Step (%d seconds). \n", floor(proc.time()-t1)[3]))
+
     #Convergence
     convergence <- stm:::convergence.check(bound.ss, convergence, settings)
     stopits <- convergence$stopits
-    
-    #Print Updates if we haven't yet converged
-    # The report function won't work properly if there's no content covariate because beta hasn't been recovered
     if(!stopits & verbose) stm:::report(convergence, ntokens=ntokens, beta, vocab, 
                                         settings$topicreportevery, verbose)
-    #unpersist(old)
   }
 
   
