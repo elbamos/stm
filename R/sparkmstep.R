@@ -20,8 +20,7 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   covar.broadcast <- settings$covar.broadcast
   m.broadcast <- settings$m.broadcast
   
-  mult.nobs <- br #number of multinomial draws in the sample
-  offset <- log(mult.nobs)
+  offset <- log(br)
   offset.broadcast <- broadcast(spark.context, offset)
 
   counts.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
@@ -40,13 +39,14 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
     # each part should be a column from counts, representing a single vocabulary term
     offset.in <- value(offset.broadcast)
     covar.in <- value(covar.broadcast)
-    colidxs <- list()
     m <- value(m.broadcast)
+    colidxs <- list()
     
     coef <- sapply(part, USE.NAMES=FALSE,simplify=TRUE,function(a.count) {
       i <- a.count[[1]]
       colidxs <<- c(colidxs, i)
-      counts.i <- Reduce("+", a.count[[2]], rep(0, A*K))
+      counts.i <- Reduce("+", a.count[[2]])#, rep(0, A*K))
+#      print(str(counts.i))
 
       offset2 <- m[i] + offset.in
       
@@ -71,12 +71,10 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
 
     coef <- covar.in %*% coef # should have one column for each vocab in input, and rows = nrow(covar.in)
                               
-    assert_that(nrow(coef) == A*K) # there should be A*K rows
+    assert_that(nrow(coef) == A*K) 
 
     colidxs <- unlist(colidxs)    
-    coef <- sweep(coef, 2, 
-                  STATS=m[colidxs], FUN="+")
-    coef <- exp(coef)
+
     # want to split into one matrix per aspect. 
     coef <- split(coef, rep(1:A, each = K)  )
 
@@ -91,12 +89,13 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   
   mnreg.rdd <- groupByKey(mnreg.rdd, as.integer(min(A, spark.partitions)))
   mnreg.rdd <- mapPartitions(mnreg.rdd, function(part) {
+    m <- value(m.broadcast)
     lapply(part, function(x) {
-      aspect <- x[[1]]
-      C <- Reduce(x = x[[2]], f = function(y, z) 
-        list(c(y[[1]], z[[1]]), cbind(y[[2]], z[[2]])))
+      C <- Reduce(x = x[[2]], f = function(y, z) list(c(y[[1]], z[[1]]), cbind(y[[2]], z[[2]])))
       C <- C[[2]][,order(C[[1]])]
-      list(aspect, C/rowSums(C))
+      C <- sweep(C, 2, STATS=m, FUN="+")
+      C <- exp(C)
+      list(x[[1]], C/rowSums(C))
     })
   })
   
