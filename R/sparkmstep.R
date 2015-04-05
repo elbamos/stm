@@ -138,9 +138,13 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
     x[[1]][[2]]
     }), as.integer(settings$spark.partitions)
   )
+  
+  covar.in <- value(covar)
+  covar.in <- Matrix::as.matrix(covar.in)
+  xcorr <- crossprod(covar.in)
   # consolidate columns, perform vb.variational.reg on each, multiply by covar to produce some rows of mu, and 
   # then split them up into chunks of the columns of completed mu
-  mu.rdd <- mapPartitionsWithIndex(lambda.rdd, function(split, part) {
+  mapPartitionsWithIndex(lambda.rdd, function(split, part) {
     colidxs <- list() #Reduce(x = part, function(x, y) c(x[[1]], y[[1]]))
     mumap <- lapply(part, function(a.lambda) {
       colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
@@ -148,26 +152,15 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
       lapply(a.lambda[[2]], function(x) {
         column[x[[1]]] <<- x[[2]]
       })
-      column
+      covar.in %*% vb.variational.reg(Y=column, X = covar.in, Xcorr = xcorr)
     })
     mumap <- do.call(cbind, mumap)
-
-    covar.in <- value(covar)
-    covar.in <- Matrix::as.matrix(covar.in)
-    xcorr <- crossprod(covar.in)
-    xycorr <- crossprod(covar.in, mumap)    
-    
-    index <- 1:ncol(xycorr)
-    mumap2 <- lapply(index, FUN=function(i) {
-      covar.in %*% vb.variational.reg(Y=mumap[,i], X = covar.in, Xcorr = xcorr, XYcorr = xycorr[,i])
-    })
-    mumap2 <- do.call(cbind, mumap2)
 
     # now have a row-wise slice of mu
 
     index <- 0
     colidxs <- unlist(colidxs)
-    apply(mumap2, MARGIN=1, function(x) {
+    apply(mumap, MARGIN=1, function(x) {
       index <<- index + 1
       list(as.integer(index), # column of mu, equivalent to doc number
            list(
@@ -178,9 +171,10 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
     })
   })
   # Reassemble each column chunk into complete columns 
-  mapPartitions(groupByKey(mu.rdd, as.integer(settings$spark.partitions)), function(part) {
-    lapply(part, function(x) list(x[[1]], vectorcombiner(x[[2]])))
-  })
+#   documents.rdd <- leftOuterJoin(documents.rdd, mu.rdd)
+#   mapPartitions(groupByKey(mu.rdd, as.integer(settings$spark.partitions)), function(part) {
+#     lapply(part, function(x) list(x[[1]], vectorcombiner(x[[2]])))
+#   })
 }
 
 #
@@ -190,16 +184,17 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 # we could loop it through documents.rdd, or through hpb.rdd (persisting that). 
 # But we need to solve sigma and broadcast it since we need all of sigma in the e-step.  So, to think about. 
 #
-opt.sigma.spark <- function(nu, lambda.rdd, mu.rdd, settings) {  
+opt.sigma.spark <- function(nu, documents.rdd, mu.rdd, settings) {  
   sigprior <- settings$sigma$prior
   # is this collecting them in order?
-  old <- lambda.rdd
-  documents.rdd <- join(lambda.rdd, mu.rdd, as.integer(settings$spark.partitions))
+  old <- documents.rdd
+  documents.rdd <- cogroup(documents.rdd, mu.rdd, numPartitions=as.integer(settings$spark.partitions))
   persist(documents.rdd, settings$spark.persistence)
   covariance.rdd <- mapPartitions(documents.rdd, function(part) {
     lapply(part, function(x) {
       list(x[[1]],
-        x[[2]][[1]]$l - x[[2]][[2]]
+        x[[2]][[1]][[1]]$l - vectorcombiner(x[[2]][[2]])
+#        print(str(x))
       )
     })
   })
@@ -218,9 +213,9 @@ opt.sigma.spark <- function(nu, lambda.rdd, mu.rdd, settings) {
 #Variational Linear Regression with a Half-Cauchy hyperprior 
 # This code can be drastically speeded up because it reuses the same results repeatedly.  The XYCorr calculation 
 # can also be done in bulk, and then split up into columns for the rest of the calculation
-vb.variational.reg <- function(Y,X,Xcorr,XYcorr, b0=1, d0=1) {
+vb.variational.reg <- function(Y,X,Xcorr, b0=1, d0=1) {
 #  Xcorr <- crossprod(X)
-#  XYcorr <- crossprod(X,Y) 
+  XYcorr <- crossprod(X,Y) 
   
   an <- (1 + nrow(X))/2
   D <- ncol(X)

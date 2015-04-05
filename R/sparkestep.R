@@ -23,8 +23,8 @@ estep.lambda <- function(
     lapply(part, function(document) {
       document <- document[[2]]
       if (length(document) == 2) {
-        mu.i <- document[[2]]
-        document <- document[[1]]
+        mu.i <- vectorcombiner(document[[2]])
+        document <- document[[1]][[1]]
         document$mu.i <- mu.i
       }
       
@@ -123,7 +123,7 @@ estep.hpb <- function(
       bd = sum(bound),
       br = br
     )), 
-    list( "b", betaout), 
+    list("b", betaout), 
     list("l", lambdaout))
   })
 

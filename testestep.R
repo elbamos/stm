@@ -133,12 +133,12 @@ bigtest <- function() {
   )
 }
 
-#local()
-cluster()
+local()
+#cluster()
 
-#smalltest()
+smalltest()
 ## mediumtest()
-bigtest()
+#bigtest()
 
 # using 19 m1.large instances
 # on one t2 instance        e-step 1200-1700        m-step 70
@@ -170,3 +170,5 @@ bigtest()
 # 38 cpus                   e-step  140             m-step  160
 # some optimization of the opt-mu, and fixing the format of the output 0x19251b5e 
 # 38 cpus                   e-step  120             m-step  230  --- SOMETHING MAY BE OFF IN CALCULATION, PROBABLY OF MU
+# fixed calculation -- not sure how great the improvement to opt mu was though.  0x3a827ece
+# 38 cpus                   e-step  140             m-step  150
