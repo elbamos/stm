@@ -123,8 +123,6 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   assert_that(mode == "Pooled")
 #   if (mode == "L1") return(stm:::opt.mu(lambda, mode, covar, enet))
 #   if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
-  N <- settings$dim$N
-  K <- settings$dim$K
 
   covar <- settings$X.broadcast
 
@@ -135,12 +133,14 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
     }), as.integer(settings$spark.partitions)
   )
   
-  covar.in <- value(covar)
-  covar.in <- Matrix::as.matrix(covar.in)
-  xcorr <- crossprod(covar.in)
+
   # consolidate columns, perform vb.variational.reg on each, multiply by covar to produce some rows of mu, and 
   # then split them up into chunks of the columns of completed mu
   mapPartitions(lambda.rdd, function(part) {
+    covar.in <- value(covar)
+    covar.in <- Matrix::as.matrix(covar.in)
+    xcorr <- crossprod(covar.in)
+    
     colidxs <- list() #Reduce(x = part, function(x, y) c(x[[1]], y[[1]]))
     mumap <- sapply(part, USE.NAMES=FALSE, FUN=function(a.lambda) {
       colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
@@ -154,7 +154,7 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
       index <<- index + 1
       list(as.integer(index), # column of mu, equivalent to doc number
            list(
-             colidxs, # positions within the dn-specific mu vector
+             colidxs, # positions within the dn-specific mu vector - rows of mu (columns from the input)
              x
            )
       )
