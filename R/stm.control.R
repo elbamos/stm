@@ -176,8 +176,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
       t1 <- proc.time()
     }
 
-      if ("RDD" %in% class(mu.distributed)) unpersist(mu.distributed)
-      mu.distributed <- opt.mu.spark(hpb.rdd, mode = settings$gamma$mode, settings)
+    mu.distributed <- opt.mu.spark(hpb.rdd, mode = settings$gamma$mode, settings)
 
     sigma.ss <- estep.output$s
     sig.list <- opt.sigma.spark(nu=sigma.ss, documents.rdd, 
@@ -242,6 +241,8 @@ stm.control.spark <- function(documents, vocab, settings, model,
   lambda <- cbind(lambda,0)
   
   saveAsObjectFile(documents.rdd, paste0(spark.filename, "documents.rdd"))
+  unpersist(hpb.rdd)
+  unpersist(documents.rdd)
   
   model <- list(mu=mu, sigma=sigma, beta=beta, settings=settings,
                 vocab=vocab, convergence=convergence, 
