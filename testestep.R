@@ -4,6 +4,7 @@ library(tm)
 library(slam)
 library(stringr)
 library(assertthat)
+library(compiler)
 
 library(lda)
 

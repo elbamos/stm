@@ -36,7 +36,7 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   
   verbose <- settings$verbose
   
-  mnreg.rdd <- mapPartitionsWithIndex(counts.rdd, function(split, part) {
+  mnreg.rdd <- mapPartitions(counts.rdd, function(part) {
     # each part should be a column from counts, representing a single vocabulary term
     offset.in <- value(offset.broadcast)
     covar.in <- value(covar.broadcast)
@@ -84,18 +84,18 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
     lapply(coef, function(x) {
       index <<- as.integer(index + 1)
       list(aspect = index, 
-           list(col = colidxs, x = x))
+           list(col = colidxs, x = matrix(x, nrow = K))
+      )
     })
   })
   
-  mnreg.rdd <- groupByKey(mnreg.rdd, as.integer(A))
-  mnreg.rdd <- mapPartitionsWithIndex(mnreg.rdd, function(split, part) {
+  mnreg.rdd <- groupByKey(mnreg.rdd, as.integer(min(A, spark.partitions)))
+  mnreg.rdd <- mapPartitions(mnreg.rdd, function(part) {
     lapply(part, function(x) {
       aspect <- x[[1]]
-      C <- matrix(rep(0, V * K), nrow = K)
-      lapply(x[[2]], function(v) {
-        C[,v[[1]] ] <<- v[[2]]
-      })
+      C <- Reduce(x = x[[2]], f = function(y, z) 
+        list(c(y[[1]], z[[1]]), cbind(y[[2]], z[[2]])))
+      C <- C[[2]][,order(C[[1]])]
       list(aspect, C/rowSums(C))
     })
   })
@@ -120,10 +120,8 @@ subM <- function(x, p) {
 }
 
 
-#
-# Function works with small amounts of data, but for some reason it uses Matrix objects sometimes, and then fails.  
-#
 opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
+  assert_that(mode == "Pooled")
 #   if (mode == "L1") return(stm:::opt.mu(lambda, mode, covar, enet))
 #   if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
   N <- settings$dim$N
@@ -131,9 +129,8 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
 
   covar <- settings$X.broadcast
 
-  
   # extract the chunks of lambda columns from the hpb output
-  lambda.rdd <- groupByKey(mapPartitionsWithIndex(hpb.rdd, function(split, part) {
+  lambda.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
     x <- Filter(function(f) f[[1]] == "l", part)
     x[[1]][[2]]
     }), as.integer(settings$spark.partitions)
@@ -144,19 +141,13 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   xcorr <- crossprod(covar.in)
   # consolidate columns, perform vb.variational.reg on each, multiply by covar to produce some rows of mu, and 
   # then split them up into chunks of the columns of completed mu
-  mapPartitionsWithIndex(lambda.rdd, function(split, part) {
+  mapPartitions(lambda.rdd, function(part) {
     colidxs <- list() #Reduce(x = part, function(x, y) c(x[[1]], y[[1]]))
-    mumap <- lapply(part, function(a.lambda) {
+    mumap <- sapply(part, USE.NAMES=FALSE, FUN=function(a.lambda) {
       colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
-      column <- rep(0, N)
-      lapply(a.lambda[[2]], function(x) {
-        column[x[[1]]] <<- x[[2]]
-      })
+      column <- vectorcombiner(a.lambda[[2]])
       covar.in %*% vb.variational.reg(Y=column, X = covar.in, Xcorr = xcorr)
     })
-    mumap <- do.call(cbind, mumap)
-
-    # now have a row-wise slice of mu
 
     index <- 0
     colidxs <- unlist(colidxs)
@@ -167,26 +158,15 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
              colidxs, # positions within the dn-specific mu vector
              x
            )
-           )
+      )
     })
   })
-  # Reassemble each column chunk into complete columns 
-#   documents.rdd <- leftOuterJoin(documents.rdd, mu.rdd)
-#   mapPartitions(groupByKey(mu.rdd, as.integer(settings$spark.partitions)), function(part) {
-#     lapply(part, function(x) list(x[[1]], vectorcombiner(x[[2]])))
-#   })
 }
 
-#
-# This function is not complete -- it should work partially, 
-# but we haven't yet figured out a good way to do the crossprod.
-# Also reallly should think this through.  Since it wants lambda as an .rdd of rows, 
-# we could loop it through documents.rdd, or through hpb.rdd (persisting that). 
-# But we need to solve sigma and broadcast it since we need all of sigma in the e-step.  So, to think about. 
-#
+
 opt.sigma.spark <- function(nu, documents.rdd, mu.rdd, settings) {  
   sigprior <- settings$sigma$prior
-  # is this collecting them in order?
+
   old <- documents.rdd
   documents.rdd <- cogroup(documents.rdd, mu.rdd, numPartitions=as.integer(settings$spark.partitions))
   persist(documents.rdd, settings$spark.persistence)
@@ -194,7 +174,6 @@ opt.sigma.spark <- function(nu, documents.rdd, mu.rdd, settings) {
     lapply(part, function(x) {
       list(x[[1]],
         x[[2]][[1]][[1]]$l - vectorcombiner(x[[2]][[2]])
-#        print(str(x))
       )
     })
   })
@@ -211,8 +190,7 @@ opt.sigma.spark <- function(nu, documents.rdd, mu.rdd, settings) {
 
 
 #Variational Linear Regression with a Half-Cauchy hyperprior 
-# This code can be drastically speeded up because it reuses the same results repeatedly.  The XYCorr calculation 
-# can also be done in bulk, and then split up into columns for the rest of the calculation
+
 vb.variational.reg <- function(Y,X,Xcorr, b0=1, d0=1) {
 #  Xcorr <- crossprod(X)
   XYcorr <- crossprod(X,Y) 

@@ -15,7 +15,7 @@ estep.lambda <- function(
   # it will still be broadcast on the first iteration so use 1.  If its already an rdd, use 2. 
   #
   
-  mapPartitionsWithIndex(documents.rdd, function(split, part) {
+  mapPartitions(documents.rdd, function(part) {
     if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
     siginv.in <- value(siginv.broadcast)
@@ -63,13 +63,13 @@ estep.hpb <- function(
   
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
-  hpb.rdd <- mapPartitionsWithIndex(documents.rdd, function(split,part) {
+  hpb.rdd <- mapPartitions(documents.rdd, function(part) {
     beta.ss <- vector(mode="list", length=A)
     for(i in 1:A) {
       beta.ss[[i]] <- matrix(0, nrow=K,ncol=V)
     }
     sigma.ss <- diag(0, nrow=(K-1))
-    lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
+#    lambda <- rep(NULL, times = K) # K - 1, plus 1 column for row order so we can sort later
     
     if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
     beta.in <- value(beta.distributed)
@@ -77,7 +77,7 @@ estep.hpb <- function(
     sigmaentropy.in <- value(sigmaentropy.broadcast)
     assert_that(length(part) > 0)
     bound <- 0
-    lapply(part, function(document) {
+    lambda <- sapply(part, USE.NAMES=FALSE,FUN=function(document) {
       document <- document[[2]]
       mu.i <- document$mu.i
       if ("Broadcast" %in% class(mu.distributed)){
@@ -96,8 +96,8 @@ estep.hpb <- function(
       
       beta.ss[[document$a]][,words] <<- doc.results$phis + beta.ss[[document$a]][,words]
       sigma.ss <<- sigma.ss + doc.results$eta$nu
-      lambda <<- rbind(lambda, c(document$dn, document$l))
       bound <<- bound + doc.results$bound
+      c(document$dn, document$l)
     })
     beta.ss <- do.call(rbind, beta.ss)
     br <- rowSums(beta.ss)
@@ -111,9 +111,10 @@ estep.hpb <- function(
     betaout <- Filter(Negate(is.null), betaout)
     
     index <- 0
-    lr <- lambda[,1]
-    lambda <- lambda[,2:ncol(lambda)]
-    lambdaout <- apply(lambda, MARGIN=2, FUN=function(x) {
+    
+    lr <- lambda[1,]
+    lambda <- lambda[2:nrow(lambda),]
+    lambdaout <- apply(lambda, MARGIN=1, FUN=function(x) {
       index <<- index + 1
       list(as.integer(index), list(lr, x))
     })
