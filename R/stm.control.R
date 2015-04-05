@@ -67,24 +67,24 @@ stm.control.spark <- function(documents, vocab, settings, model,
   ))
   })
 
-  # documents.rdd is a value list (not a pair list).  Each iteration, 
-  # the e-step runs logisticnormal inside mapPartitionsAsIndex to update lambda.
-  # This produces a new documents.rdd, which is persisted in memory and on disk.
-  # (This should really be changed to be user controllable.)
-  # Then, hpb is executed through a mapPartitionsAsIndex, and the output
-  # from each partition is merged.  All partitions' outputs are merged in a reduce.
-  # Then, the prior iteration's documents.rdd is unpersisted, and the m-step is executed.
-  
-  # beta, mu, sigma, and siginv are broadcast variables.  It may be worth exploring
-  # whether beta or mu could be implemented as rdd's which are then joined with documents.rdd
-  # during the e-step. This would probably require accumulators, which have not 
-  # yet been implemented in SparkR, to be efficient.
+  # documents.rdd is a pair list.  Each iteration, 
+  # the e-step runs logisticnormal inside mapPartitions to update lambda.
+  # This produces a new documents.rdd, which is persisted.
+  # Then, hpb is executed through a mapPartitions, to produce hpb.rdd with sufficient stats,
+  # and with beta and lambda separated into columns.  sigma.ss, the rowSums of beta.ss, and 
+  # the sum of the bounds, are recovered from hpb.rdd.  
+  # The columns of lambda are extracted from hpb.rdd and processed into a mu.rdd.  
+  # mu.rdd is joined with the old documents.rdd, the result is persisted, and the old documents.rdd is unpersisted.
+  # Opt-sigma is run by subtracting mu from lambda in documents.rdd, the results are recovered to complete
+  # opt-sigma, and the new siginv and sigmaentropy are broadcast.  
+  # Then, the columns of beta.ss are extracted from hpb.rdd.  Mnreg is run on the columns to produce an
+  # mnreg.rdd which is indexed by aspect.  The aspects are merged, the resulting beta matrix recovered,
+  # and beta is re-broadcast.  The process the begins again with documents.rdd.
+
+  # beta, mu, sigma, and siginv are broadcast variables.  
   filename <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
   saveAsObjectFile(parallelize(spark.context, doclist, spark.partitions), filename)
   documents.rdd <- objectFile(spark.context, filename, spark.partitions)
-  persist(documents.rdd, spark.persistence)
-  settings$betafile <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
-  settings$mufile <- paste0(spark.filename, round(abs(rnorm(1) * 10000)), ".rdd")
   
   beta.distributed <- distribute.beta(beta$beta, spark.context, spark.partitions) 
   mu.distributed <- distribute.mu(mu, spark.context, spark.partitions = spark.partitions, settings)
@@ -112,8 +112,9 @@ stm.control.spark <- function(documents, vocab, settings, model,
       vecv <- rep(1,length(veci))
       covar <- sparseMatrix(veci, vecj, x=vecv)
     }  
+    settings$covar.broadcast <- broadcast(spark.context, covar)
     settings$covar <- covar
-    settings$covar.broadcast <- broadcast(spark.context, covar)  
+      
     m <- settings$dim$wcounts$x
     m <- log(m) - log(sum(m))
     settings$m.broadcast <- broadcast(spark.context, m)
@@ -190,22 +191,18 @@ stm.control.spark <- function(documents, vocab, settings, model,
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
   
     if (is.null(settings$bkappa)) {
-      beta.ss <- rbind(estep.output$b)[[1]]
+      beta.ss <- reduceByKey(hpb.rdd, function(x) {
+           vectorcombiner(x)
+      })
+      beta.ss <- do.call(rbind, beta.ss)
       beta.ss <- beta.ss / rowSums(beta.ss)
       beta.distributed <- distribute.beta(beta = list(beta.ss), spark.context = spark.context, spark.partitions = spark.partitions)
       beta$beta <- beta.ss
       beta$beta.distributed <- beta.distributed
     }  else {
-      if(settings$tau$mode=="L1") {
-
-        beta <- mnreg.spark.distributedbeta(hpb.rdd, estep.output$br, settings, spark.context, spark.partitions)
-
-        beta.distributed <- beta$beta.distributed
-      } else {
-        beta <- stm:::jeffreysKappa(estep.output$b, kappa, settings) 
-        beta$beta.distributed <- distribute.beta(beta = beta$beta, spark.context, spark.partitions)
-        beta.distributed <- beta$beta.distributed
-      }
+      assert_that(settings$tau$mode == "L1")
+      beta <- mnreg.spark.distributedbeta(hpb.rdd, estep.output$br, settings, spark.context, spark.partitions)
+      beta.distributed <- beta$beta.distributed
     }
     bound.ss <- estep.output$bd  
 
@@ -238,14 +235,20 @@ stm.control.spark <- function(documents, vocab, settings, model,
   lambda <- collectAsMap(lambda.rdd)
   lambda <- lambda[order(names(lambda))]
   lambda <- do.call(rbind, lambda)
+  # Need to collect beta.ss here
   mu <- collectAsMap(mu.rdd)
   mu <- mu[order(names(mu))]
   mu <- do.call(cbind, mu)
   lambda <- cbind(lambda,0)
+  
+  saveAsObjectFile(documents.rdd, paste0(spark.filename, "documents.rdd"))
+  
   model <- list(mu=mu, sigma=sigma, beta=beta, settings=settings,
                 vocab=vocab, convergence=convergence, 
                 theta=exp(lambda - stm:::row.lse(lambda)), 
                 eta=lambda[,-ncol(lambda), drop=FALSE],
+                sufficient.statws = list(sigma.ss = sigma.ss), 
+                documents.rdd = paste0(spark.filename, "documents.rdd")
                 invsigma=solve(sigma), time=time, version=utils::packageDescription("stm")$Version)
   class(model) <- "STM"  
   return(model)
