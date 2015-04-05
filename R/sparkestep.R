@@ -5,13 +5,7 @@ estep.lambda <- function(
   beta.distributed,
   mu.distributed, 
   siginv.broadcast,
-  settings,
-  verbose) {
-  
-  #
-  # If mu is not being turned into an rdd, use 0.  If mu is being turned into an rdd,
-  # it will still be broadcast on the first iteration so use 1.  If its already an rdd, use 2. 
-  #
+  settings) {
   
   mapPartitions(documents.rdd, function(part) {
     if ("Broadcast" %in% class(mu.distributed)) mu.in <- value(mu.distributed)
@@ -20,6 +14,7 @@ estep.lambda <- function(
     assert_that(length(part) > 0)
     lapply(part, function(document) {
       document <- document[[2]]
+      # Handle if documents.rdd has been joined to mu.rdd
       if (length(document) == 2) {
         mu.i <- vectorcombiner(document[[2]])
         document <- document[[1]][[1]]
@@ -54,8 +49,7 @@ estep.hpb <- function(
   documents.rdd,
   beta.distributed,
   siginv.broadcast,
-  sigmaentropy.broadcast,
-  verbose) {
+  sigmaentropy.broadcast) {
   
   # loops through partitions of documents.rdd, collecting sufficient stats per-partition.   Produces
   # a pair (key, value) RDD where the key is the partition and the value the sufficient stats.
@@ -87,7 +81,7 @@ estep.hpb <- function(
       c(document[["dn"]], document[["l"]])
     })
     beta.ss <- do.call(rbind, beta.ss)
-    br <- rowSums(beta.ss)
+    br <- rowSums(beta.ss) # doing this now lets us perform mnreg in the cluster without bringing all of beta back in
     
     index <- 0
     betaout <- apply(beta.ss, MARGIN=2, FUN= function(x) {
@@ -114,10 +108,10 @@ estep.hpb <- function(
     list("l", lambdaout))
   })
 
-  # merge the sufficient stats generated for each partition
   cache(hpb.rdd)
-  output.rdd <- filterRDD(hpb.rdd, function(x) x[[1]] == "o")
-  out <- reduce(output.rdd, function(x, y) {
+  
+  # Recover sufficient stats
+  out <- reduce(filterRDD(hpb.rdd, function(x) x[[1]] == "o"), function(x, y) {
     if ((is.null(x) || is.integer(x)) && !is.null(y)) return(y)
     if ((is.null(y) || is.integer(y)) && !is.null(x)) return(x)
     if (length(x) == 2) x <- x[[2]]
