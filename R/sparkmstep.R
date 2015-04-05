@@ -15,7 +15,7 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   thresh <- settings$tau$tol
   #Aggregate outcome data.
   
-#  assert_that(!fixedintercerpt)
+  assert_that(is.null(fixedintercept) || !fixedintercerpt)
   
   covar.broadcast <- settings$covar.broadcast
   m.broadcast <- settings$m.broadcast
@@ -26,7 +26,7 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   counts.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
       x <- Filter(function(f) f[[1]] == "b", part)
       x[[1]][[2]]
-    }), as.integer(spark.partitions)
+    }), spark.partitions
   )
   
   #########
@@ -130,7 +130,7 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   lambda.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
     x <- Filter(function(f) f[[1]] == "l", part)
     x[[1]][[2]]
-    }), as.integer(settings$spark.partitions)
+    }), settings$spark.partitions
   )
   
 
@@ -167,12 +167,12 @@ opt.sigma.spark <- function(nu, documents.rdd, mu.rdd, settings) {
   sigprior <- settings$sigma$prior
 
   old <- documents.rdd
-  documents.rdd <- cogroup(documents.rdd, mu.rdd, numPartitions=as.integer(settings$spark.partitions))
+  documents.rdd <- cogroup(documents.rdd, mu.rdd, numPartitions=settings$spark.partitions)
   persist(documents.rdd, settings$spark.persistence)
   covariance.rdd <- mapPartitions(documents.rdd, function(part) {
     lapply(part, function(x) {
       list(x[[1]],
-        x[[2]][[1]][[1]]$l - vectorcombiner(x[[2]][[2]])
+        x[[2]][[1]][[1]][["l"]] - vectorcombiner(x[[2]][[2]])
       )
     })
   })
@@ -180,7 +180,6 @@ opt.sigma.spark <- function(nu, documents.rdd, mu.rdd, settings) {
   covariance <- do.call(rbind,covariance[order(names(covariance))]) 
   covariance <- crossprod(covariance)
   unpersist(old)
-  unpersist(mu.rdd)
 
   sigma <- (covariance + nu)/settings$dim$N #add to estimation variance
   sigma <- diag(diag(sigma),nrow=nrow(nu))*sigprior + (1-sigprior)*sigma #weight by the prior
