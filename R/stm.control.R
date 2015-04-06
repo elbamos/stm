@@ -123,8 +123,9 @@ stm.control.spark <- function(documents, vocab, settings, model,
   }
   X <-  settings$covariates$X
   settings$X.broadcast <- broadcast(spark.context, X)
-  settings$spark.partitions <- spark.partitions
+  settings$spark.partitions <- as.integer(spark.partitions)
   settings$spark.persistence <- spark.persistence
+  settings$spark.context <- spark.context
   
   sigmaentropy <- (.5*determinant(sigma, logarithm=TRUE)$modulus[1])
   siginv <- solve(sigma)
@@ -183,7 +184,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
     siginv <- solve(sigma)
     siginv.broadcast <- broadcast(spark.context, siginv)
     sigmaentropy.broadcast <- broadcast(spark.context, sigmaentropy)
-  
+
     # Opt beta
     if (is.null(settings$bkappa)) {
       beta.ss <- reduceByKey(hpb.rdd, function(x) {
@@ -191,15 +192,14 @@ stm.control.spark <- function(documents, vocab, settings, model,
       })
       beta.ss <- do.call(rbind, beta.ss)
       beta.ss <- beta.ss / rowSums(beta.ss)
-      beta.distributed <- distribute.beta(beta = list(beta.ss), spark.context = spark.context, spark.partitions = spark.partitions) 
+      beta.distributed <- distribute.beta(beta = list(beta.ss), spark.context = spark.context, spark.partitions) 
       beta$beta <- beta.ss
       beta$beta.distributed <- beta.distributed
     }  else {
       assert_that(settings$tau$mode == "L1")
-      beta <- mnreg.spark.distributedbeta(hpb.rdd, estep.output$br, settings, spark.context, spark.partitions)
+      beta <- mnreg.spark.distributedbeta(hpb.rdd, estep.output$br, settings)
       beta.distributed <- beta$beta.distributed
     }
-    
     # The bound
     bound.ss <- estep.output$bd  
     
@@ -244,7 +244,7 @@ stm.control.spark <- function(documents, vocab, settings, model,
                 theta=exp(lambda - stm:::row.lse(lambda)), 
                 eta=lambda[,-ncol(lambda), drop=FALSE],
                 sufficient.statws = list(sigma.ss = sigma.ss), 
-                documents.rdd = paste0(spark.filename, "documents.rdd")
+                documents.rdd = paste0(spark.filename, "documents.rdd"),
                 invsigma=solve(sigma), time=time, version=utils::packageDescription("stm")$Version)
   class(model) <- "STM"  
   return(model)

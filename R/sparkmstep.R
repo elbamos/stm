@@ -1,6 +1,6 @@
 # This implementation doesn't work right now.  The concept is to move some of the post-glmnet processing of
 # opt beta out into the cluster.
-mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spark.partitions) {
+mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings) {
   #Parse Arguments
   A <- settings$dim$A
   K <- settings$dim$K
@@ -15,8 +15,11 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
   thresh <- settings$tau$tol
   #Aggregate outcome data.
   
-  assert_that(is.null(fixedintercept) || !fixedintercerpt)
+#  assert_that(is.null(fixedintercept) || !fixedintercerpt)
   
+spark.partitions <- settings$spark.partitions
+spark.context <- settings$spark.context
+
   covar.broadcast <- settings$covar.broadcast
   m.broadcast <- settings$m.broadcast
   
@@ -87,7 +90,7 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
     })
   })
   
-  mnreg.rdd <- groupByKey(mnreg.rdd, as.integer(min(A, spark.partitions)))
+  mnreg.rdd <- groupByKey(mnreg.rdd, as.integer(A))
   mnreg.rdd <- mapPartitions(mnreg.rdd, function(part) {
     m <- value(m.broadcast)
     lapply(part, function(x) {
@@ -98,7 +101,6 @@ mnreg.spark.distributedbeta <- function(hpb.rdd,br, settings, spark.context, spa
       list(x[[1]], C/rowSums(C))
     })
   })
-  
   # We're collecting this only so we can broadcast it again because we haven't figured out a memory-efficient
   # way to join beta.rdd and documents.rdd.  
   beta <- collectAsMap(mnreg.rdd)
