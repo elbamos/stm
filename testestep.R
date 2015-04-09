@@ -41,8 +41,8 @@ cluster <- function() {
                     spark.serializer="org.apache.spark.serializer.KryoSerializer",
                     spark.executor.extraJavaOptions="-XX:+UseCompressedOops",
                     spark.kryoserializer.buffer.mb = "512",
-  driver.memory="28g",
-  driver.maxResultSize='28g',
+                    driver.memory="28g",
+                    driver.maxResultSize='28g',
                     spark.driver.memory=ram, 
                     spark.driver.maxResultSize = ram
   )
@@ -50,8 +50,8 @@ cluster <- function() {
   master <- system("cat /root/spark-ec2/cluster-url", intern=TRUE)
   
   spark.context <<- sparkR.init(master=master,
-                               appName = paste0("poli", Sys.time()),
-                               sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
+                                appName = paste0("poli", Sys.time()),
+                                sparkEnvir=spark.env, sparkExecutorEnv = spark.env)
   filepath <- str_replace(master, "spark", "hdfs")
   filepath <<- str_replace(filepath, "7077", "9000/docs") #"hdfs://ec2-54-0-234-71.compute-1.amazonaws.com:9000/docs"
 }
@@ -134,12 +134,12 @@ bigtest <- function() {
   )
 }
 
-local()
-#cluster()
+#local()
+cluster()
 
-smalltest()
+#smalltest()
 ## mediumtest()
-#bigtest()
+bigtest()
 
 # using 19 m1.large instances
 # on one t2 instance        e-step 1200-1700        m-step 70
@@ -173,3 +173,7 @@ smalltest()
 # 38 cpus                   e-step  120             m-step  230  --- SOMETHING MAY BE OFF IN CALCULATION, PROBABLY OF MU
 # fixed calculation -- not sure how great the improvement to opt mu was though.  0x3a827ece
 # 38 cpus                   e-step  140             m-step  150
+# distributing (not broadcasting m) 42f5167e
+# 38 cpus                   e-step  115             m-step  175
+# minor improvements off of prior (broadcasting m) 309e6515
+# 38 cpus                   e-step  120             m-step  150

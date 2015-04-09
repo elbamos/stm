@@ -28,9 +28,18 @@ spark.context <- settings$spark.context
 
   counts.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
       x <- Filter(function(f) f[[1]] == "b", part)
-      x[[1]][[2]]
+      beta.ss <- x[[1]][[2]]
+      index <- 0
+      beta <- split(beta.ss, rep(1:spark.partitions, each = A * K * ceiling(V/spark.partitions)))
+      lapply(beta, function(x) {
+        index <<- index + 1
+        list(as.integer(index), 
+                   matrix(x, nrow = A * K))
+      })
     }), spark.partitions
   )
+#   counts.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "b"), function(x) x[[2]]), 
+#                            spark.partitions)
   
   #########
   #Distributed Poissons
@@ -38,24 +47,29 @@ spark.context <- settings$spark.context
   
   verbose <- settings$verbose
   
-  mnreg.rdd <- mapPartitions(counts.rdd, function(part) {
+  mnreg.rdd <- mapPartitions(counts.rdd, function(a.chunk) {
     # each part should be a column from counts, representing a single vocabulary term
     offset.in <- value(offset.broadcast)
     covar.in <- value(covar.broadcast)
     m <- value(m.broadcast)
-    colidxs <- list()
+    a.chunk <- a.chunk[[1]]
+  
     
-    coef <- sapply(part, USE.NAMES=FALSE,simplify=TRUE,function(a.count) {
-      i <- a.count[[1]]
-      colidxs <<- c(colidxs, i)
-      counts.i <- Reduce("+", a.count[[2]])#, rep(0, A*K))
+    beta.chunk <- Reduce("+", a.chunk[[2]])#, rep(0, A*K))
+    colidxs <- ((a.chunk[[1]] - 1) * ceiling(V/spark.partitions)) + 1
+    colidxs <- colidxs:(colidxs + ncol(beta.chunk) -1)
+    
+    i <- 0
+    coef <- apply(beta.chunk, MARGIN = 2, FUN = function(beta.column) {
+      i <<- i + 1
+
 #      print(str(counts.i))
 
-      offset2 <- m[i] + offset.in
+      offset2 <- m[colidxs[i]] + offset.in
       
       mod <- NULL
       while(is.null(mod)) {
-        mod <- tryCatch(glmnet(x=covar.in, y=counts.i, family="poisson", 
+        mod <- tryCatch(glmnet(x=covar.in, y=beta.column, family="poisson", 
                                offset=offset2, standardize=FALSE,
                                intercept=FALSE, 
                                lambda.min.ratio=lambda.min.ratio,
@@ -71,12 +85,12 @@ spark.context <- settings$spark.context
       lambda <- which.min(ic)
       subM(mod$beta,lambda) #return coefficients
     } )
-
+ #   coef <- t(coef)
     coef <- covar.in %*% coef # should have one column for each vocab in input, and rows = nrow(covar.in)
                               
     assert_that(nrow(coef) == A*K) 
 
-    colidxs <- unlist(colidxs)    
+ #   colidxs <- unlist(colidxs)    
 
     # want to split into one matrix per aspect. 
     coef <- split(coef, rep(1:A, each = K)  )
@@ -84,25 +98,27 @@ spark.context <- settings$spark.context
     index <- 0
     lapply(coef, function(x) {
       index <<- as.integer(index + 1)
-      list(aspect = index, 
+      list(index, #aspect
            list(col = colidxs, x = matrix(x, nrow = K))
       )
     })
   })
   
   mnreg.rdd <- groupByKey(mnreg.rdd, as.integer(A))
-  mnreg.rdd <- mapPartitions(mnreg.rdd, function(part) {
-    m <- value(m.broadcast)
-    lapply(part, function(x) {
-      C <- Reduce(x = x[[2]], f = function(y, z) list(c(y[[1]], z[[1]]), cbind(y[[2]], z[[2]])))
+  mnreg.rdd <- mapPartitions(mnreg.rdd, function(aspect) {
+
+      m <- value(m.broadcast)
+      C <- Reduce(x = aspect[[1]][[2]], f = function(y, z)  list(c(y[[1]], z[[1]]), cbind(y[[2]], z[[2]])))
+
       C <- C[[2]][,order(C[[1]])]
+
       C <- sweep(C, 2, STATS=m, FUN="+")
       C <- exp(C)
-      list(x[[1]], C/rowSums(C))
-    })
+      list(list(aspect[[1]][[1]], C/rowSums(C)))
   })
   # We're collecting this only so we can broadcast it again because we haven't figured out a memory-efficient
-  # way to join beta.rdd and documents.rdd.  
+  # way to join beta.rdd and documents.rdd. 
+
   beta <- collectAsMap(mnreg.rdd)
   beta <- beta[order(names(beta))]
   beta.distributed <- distribute.beta(spark.context = spark.context, beta, spark.partitions)
@@ -125,33 +141,67 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
   assert_that(mode == "Pooled")
 #   if (mode == "L1") return(stm:::opt.mu(lambda, mode, covar, enet))
 #   if (mode == "CTM") return(matrix(colMeans(lambda), ncol=1))
-
+  spark.partitions <- settings$spark.partitions
   covar <- settings$X.broadcast
+  K <- settings$dim$K
+  N <- settings$dim$N
 
   # extract the chunks of lambda columns from the hpb output
+  # Each chunk is some rows of all columns of lambda.  Split it up into chunks where each one is some number of columns.  
   lambda.rdd <- groupByKey(mapPartitions(hpb.rdd, function(part) {
+#    print(str(part))
     x <- Filter(function(f) f[[1]] == "l", part)
-    x[[1]][[2]]
-    }), settings$spark.partitions
+    lambda <- x[[1]][[2]]
+    index <- 0
+    lr <- lambda[1,]
+    lambda <- t(lambda[2:nrow(lambda),])
+    height <-length(lr)
+    lambda <- split(lambda, rep(1:spark.partitions, each = height * ceiling((K-1)/spark.partitions)))
+    lapply(lambda, function(x) {
+      index <<- index + 1
+      list(as.integer(index), # which column of lambda, there are K-1
+           list(lr,  # which rows of lambda
+           matrix(x, nrow = height)))
+    })
+  }), settings$spark.partitions
   )
+#   lambda.rdd <- groupByKey(flatMap(filterRDD(hpb.rdd, function(x) x[[1]] == "l"), function(x) x[[2]]), 
+#                            settings$spark.partitions)
   
 
   # consolidate columns, perform vb.variational.reg on each, multiply by covar to produce some rows of mu, and 
   # then split them up into chunks of the columns of completed mu
-  mapPartitions(lambda.rdd, function(part) {
+  mapPartitions(lambda.rdd, function(chunk) {
+    chunk <- chunk[[1]]
     covar.in <- value(covar)
     covar.in <- Matrix::as.matrix(covar.in)
     xcorr <- crossprod(covar.in)
+    colidxs <- ((chunk[[1]] - 1) * ceiling((K-1)/spark.partitions) + 1)
+    width <- ncol(chunk[[2]][[1]][[2]])
+    colidxs <- colidxs:(colidxs + width - 1)
+   
+ #   colidxs <- list() #Reduce(x = part, function(x, y) c(x[[1]], y[[1]]))
+    # now need to reassemble.  The format should be 
+    # list(index,  used to calculate the leftmost column
+      # list(
+      #     list(lr, the row indices
+                  # x),    a matrix
+          # list(lr, x)
+    #mumap <- matrix(rep(0, (K - 1) * width), ncol = width)
+ #   lapply(chunk[[2]][[1]], function(chunk.slice) mumap[chunk.slice[[1]],] <<- chunk.slice[[2]])
+    mumap <- Reduce(x = chunk[[2]], f=function(y, z) list(c(y[[1]], z[[1]]), rbind(y[[2]], z[[2]])))
+
+ 
+    mumap <- mumap[[2]][order(mumap[[1]]),]
+   
+    # should now have a matrix with some columnns of lambda, where each column is complete
     
-    colidxs <- list() #Reduce(x = part, function(x, y) c(x[[1]], y[[1]]))
-    mumap <- sapply(part, USE.NAMES=FALSE, FUN=function(a.lambda) {
-      colidxs <<- c(colidxs, a.lambda[[1]]) # columns of lambda used in output, rows of mu in output
-      column <- vectorcombiner(a.lambda[[2]])
+    mumap <- apply(mumap, MARGIN=2, FUN=function(column) {
       covar.in %*% vb.variational.reg(Y=column, X = covar.in, Xcorr = xcorr)
     })
-
+    # should now have a transpose of some columns of mu
+   
     index <- 0
-    colidxs <- unlist(colidxs)
     apply(mumap, MARGIN=1, function(x) {
       index <<- index + 1
       list(as.integer(index), # column of mu, equivalent to doc number
@@ -160,8 +210,9 @@ opt.mu.spark <- function(hpb.rdd, mode=c("CTM","Pooled", "L1"), settings) {
              x
            )
       )
+
     })
-  })
+    })
 }
 
 
@@ -172,6 +223,7 @@ opt.sigma.spark <- function(nu, documents.rdd, mu.rdd, settings) {
   documents.rdd <- cogroup(documents.rdd, mu.rdd, numPartitions=settings$spark.partitions)
   persist(documents.rdd, settings$spark.persistence)
   covariance.rdd <- mapPartitions(documents.rdd, function(part) {
+    
     lapply(part, function(x) {
       list(x[[1]],
         x[[2]][[1]][[1]][["l"]] - vectorcombiner(x[[2]][[2]])

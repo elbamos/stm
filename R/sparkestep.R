@@ -83,29 +83,13 @@ estep.hpb <- function(
     beta.ss <- do.call(rbind, beta.ss)
     br <- rowSums(beta.ss) # doing this now lets us perform mnreg in the cluster without bringing all of beta back in
     
-    index <- 0
-    betaout <- apply(beta.ss, MARGIN=2, FUN= function(x) {
-      index <<- index + 1
-      if (sum(x) == 0) {NULL} 
-      else {list(as.integer(index), x)}
-    })
-    betaout <- Filter(Negate(is.null), betaout)
-    
-    index <- 0
-    lr <- lambda[1,]
-    lambda <- lambda[2:nrow(lambda),]
-    lambdaout <- apply(lambda, MARGIN=1, FUN=function(x) {
-      index <<- index + 1
-      list(as.integer(index), list(lr, x))
-    })
-
     list(list("o", list(
       s = sigma.ss, 
       bd = sum(bound),
       br = br
     )), 
-    list("b", betaout), 
-    list("l", lambdaout))
+    list("b", beta.ss), 
+    list("l", lambda))
   })
 
   cache(hpb.rdd)
